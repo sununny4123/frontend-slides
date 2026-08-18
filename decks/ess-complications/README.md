@@ -28,13 +28,35 @@ No build step, no server, no dependencies.
 - **Section beats.** Moving into a new chapter blurs the deck for a moment
   behind a chapter card — the reading rhythm the original PowerPoint lacked.
   It only fires on sequential navigation, never on a jump.
-- **Statement slides.** Short text-only slides hug their content and place a
-  large outlined chapter numeral in the space they leave, instead of
-  stretching a half-empty sheet across the stage.
+- **Nothing goes to waste.** Prose scales up as well as down: the auto-fit
+  searches for the *largest* type that still fits, so a sparse slide fills the
+  stage instead of floating in a half-empty sheet. Figures are laid out as
+  justified rows — each card is cut to its own image's aspect and every row is
+  stretched to the full block width, so there is no letterboxing and no empty
+  grid cells. In a gallery the figures claim the height they can actually use
+  and hand the remainder back to the prose panel above them.
 - **Contents on the cover.** All 15 chapters with their slide ranges, each
   row clickable.
-- Direction-aware slide transitions, staggered reveals, and a faint plotting
-  grid behind the glass. All motion respects `prefers-reduced-motion`.
+- **Five motion families**, cycled across the deck so no two neighbouring
+  slides arrive the same way: lift, split (text from the left, figures from the
+  right), focus (a soft zoom out of blur), wipe, and fan. Each moves the
+  header, the panel and the figures on its own curve and delay, and the
+  horizontal families mirror themselves when you go backwards.
+- A faint plotting grid behind the glass. All motion respects
+  `prefers-reduced-motion` and is disabled in print.
+
+## Telegraphic wording
+
+Bullets, figure captions, transcribed panels and table cells are written in
+clinical shorthand: articles and copulas dropped, passives collapsed to the
+participle, padding phrases cut, comparisons and measures set as symbols
+(`≥`, `>`, `~`, `30°`, `55–70 mmHg`, `bpm`).
+
+Nothing is paraphrased and no fact is removed. Every compressed line keeps its
+original sentence on the element, and **`W`** (or the ¶ button in the dock)
+swaps the whole deck between telegraphic and the full lecture wording — the
+choice is remembered. Editing a line drops its pairing, so your words are never
+swapped out from under you.
 
 ## What's in it
 
@@ -68,6 +90,7 @@ next to it.
 | `P` | presenter timer (double-click the dock button to reset) |
 | `T` | light / dark glass |
 | `F` | fullscreen |
+| `W` | telegraphic / full wording |
 | `E` | real-time edit mode (see below) |
 | `?` | shortcut reference |
 | `Esc` | close any overlay |

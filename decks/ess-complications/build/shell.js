@@ -23,7 +23,8 @@
         editing: false,
         ch: -1,
         timer: { on: false, sec: 0, id: null },
-        jumpBuf: ''
+        jumpBuf: '',
+        terse: true
     };
 
     /* -------------------------------------------------------
@@ -43,17 +44,31 @@
         var f = pb.querySelector('.fit');
         if (!f) return;
         var multicol = (getComputedStyle(f).columnCount || 'auto') !== 'auto';
-        f.style.setProperty('--fit', 1);
-        var s = 1, guard = 0;
-        var over = function () {
-            return multicol ? f.scrollWidth > f.clientWidth + 1
-                            : f.scrollHeight > pb.clientHeight + 1;
+        var max = +(pb.dataset.grow || 1.85);
+
+        var fits = function (s) {
+            f.style.setProperty('--fit', s);
+            /* a real margin, not a rounding guard: fonts settle late and line
+               wrapping shifts by a few px, so the fitted size keeps slack */
+            return multicol ? f.scrollWidth <= f.clientWidth - 10
+                            : f.scrollHeight <= pb.clientHeight - 10;
         };
-        while (over() && s > 0.44 && guard++ < 50) {
-            s -= 0.025;
-            f.style.setProperty('--fit', s.toFixed(3));
+
+        /* binary-search the largest scale that still fits: dense slides shrink,
+           sparse ones grow until they own the stage — no dead space either way */
+        var lo, hi;
+        if (fits(1)) { lo = 1; hi = max; if (fits(max)) { lo = max; hi = max; } }
+        else { lo = 0.44; hi = 1; }
+        for (var k = 0; k < 16 && hi - lo > 0.006; k++) {
+            var mid = (lo + hi) / 2;
+            if (fits(mid)) lo = mid; else hi = mid;
         }
-        pb.dataset.fit = s.toFixed(2);
+        /* final verification: line-wrap thresholds make the search's answer
+           occasionally optimistic, so step down until it genuinely fits */
+        var g = 0;
+        while (!fits(lo) && lo > 0.44 && g++ < 24) lo -= 0.03;
+        f.style.setProperty('--fit', lo.toFixed(3));
+        pb.dataset.fit = lo.toFixed(2);
     }
 
     function fitAll() {
@@ -62,50 +77,121 @@
     }
 
     /* -------------------------------------------------------
-       FIGURE GRID SOLVER
-       Picks the column count that maximises the total rendered
-       image area for this block's real width/height, so square
-       endoscopic views and wide banners both land well.
+       JUSTIFIED FIGURE ROWS
+       Every card is sized to its own image, and every row is
+       stretched to the full block width, so figures leave no
+       letterboxing and no empty cells.
        ------------------------------------------------------- */
-    function solveGrid(box) {
+    function solveGrid(box, pass) {
         var figs = $$('.fig', box);
         if (!figs.length) return;
         var W = box.clientWidth, H = box.clientHeight;
+
+        /* a gallery's figures claim the height they can actually use; whatever
+           is left goes to the prose panel above them, which grows to fill it */
+        var lead = box.classList.contains('gal-grid') ? box.parentElement : null;
+        if (lead) {
+            var bodyH = lead.clientHeight;
+            var g = parseFloat(getComputedStyle(lead).rowGap) || 20;
+            H = Math.max(160, bodyH - g - Math.round(bodyH * 0.18));
+        }
         if (!W || !H) return;
 
-        var gap = parseFloat(getComputedStyle(box).rowGap) || 18;
+        var gap = parseFloat(getComputedStyle(box).rowGap) || 16;
         var ratios = figs.map(function (f) { return +f.dataset.ratio || 1; });
-        var chrome = figs.map(function (f) {
-            /* card padding + caption/chip rows steal height from the image */
-            var pad = 2 * (parseFloat(getComputedStyle(f).paddingTop) || 0);
-            var extra = 0;
-            $$('.fig-cap, .fig-chips', f).forEach(function (el) { extra += el.offsetHeight || 26; });
-            return pad + extra;
+        var pads = figs.map(function (f) {
+            return parseFloat(getComputedStyle(f).paddingTop) || 0;
+        });
+        /* caption and chip rows sit under the image and are not part of it */
+        var extra = figs.map(function (f) {
+            var e = 0;
+            $$('.fig-cap, .fig-chips', f).forEach(function (el) { e += el.offsetHeight || 24; });
+            return e ? e + 4 : 0;
         });
 
-        var best = null;
-        for (var cols = 1; cols <= Math.min(figs.length, 6); cols++) {
-            var spans = ratios.map(function (r) { return (cols >= 3 && r > 2.4) ? 2 : 1; });
-            var cells = spans.reduce(function (a, b) { return a + b; }, 0);
-            var rows = Math.ceil(cells / cols);
-            var cw = (W - (cols - 1) * gap) / cols;
-            var chh = (H - (rows - 1) * gap) / rows;
-            if (cw < 60 || chh < 60) continue;
-            var area = 0;
-            for (var i = 0; i < figs.length; i++) {
-                var availW = cw * spans[i] + (spans[i] - 1) * gap - 28;
-                var availH = chh - chrome[i];
-                if (availH < 24) { area = -1; break; }
-                var h = Math.min(availH, availW / ratios[i]);
-                area += h * h * ratios[i];
-            }
-            if (area > 0 && (!best || area > best.area)) best = { area: area, cols: cols, spans: spans };
-        }
-        if (!best) best = { cols: Math.min(figs.length, 3), spans: ratios.map(function () { return 1; }) };
+        var N = figs.length;
 
-        box.style.setProperty('--cols', best.cols);
-        box.dataset.cols = best.cols;
-        figs.forEach(function (f, i) { f.classList.toggle('span2', best.spans[i] === 2); });
+        /* every row is stretched to the full width, so a row's height follows
+           straight from the aspect ratios it contains */
+        function rowOf(j, i) {
+            var sum = 0, padSum = 0, ex = 0, pd = 0;
+            for (var k = j; k < i; k++) {
+                sum += ratios[k];
+                padSum += 2 * pads[k];
+                ex = Math.max(ex, extra[k]);
+                pd = Math.max(pd, pads[k]);
+            }
+            var avail = W - gap * (i - j - 1) - padSum;
+            var mh = avail / sum;
+            return { j: j, i: i, mh: mh, extra: ex, pad: pd, h: mh + ex + 2 * pd };
+        }
+
+        /* for each row count, find the break points that pack shortest, then
+           keep the tallest packing that still fits — biggest possible figures */
+        var best = null;
+        for (var R = 1; R <= N; R++) {
+            var dp = [], back = [];
+            for (var r = 0; r <= R; r++) {
+                dp.push(new Array(N + 1).fill(Infinity));
+                back.push(new Array(N + 1).fill(-1));
+            }
+            dp[0][0] = 0;
+            for (var r2 = 1; r2 <= R; r2++) {
+                for (var i2 = r2; i2 <= N; i2++) {
+                    for (var j2 = r2 - 1; j2 < i2; j2++) {
+                        if (dp[r2 - 1][j2] === Infinity) continue;
+                        var v = dp[r2 - 1][j2] + rowOf(j2, i2).h;
+                        if (v < dp[r2][i2]) { dp[r2][i2] = v; back[r2][i2] = j2; }
+                    }
+                }
+            }
+            var total = dp[R][N] + gap * (R - 1);
+            if (total > H) break;
+            best = { R: R, total: total, back: back };
+        }
+        if (!best) best = { R: 1, total: rowOf(0, N).h, back: null };
+
+        var rows = [];
+        if (best.back) {
+            var end = N;
+            for (var r3 = best.R; r3 >= 1; r3--) {
+                var st = best.back[r3][end];
+                rows.unshift(rowOf(st, end));
+                end = st;
+            }
+        } else {
+            rows = [rowOf(0, N)];
+        }
+
+        rows.forEach(function (row) {
+            for (var i = row.j; i < row.i; i++) {
+                var f = figs[i];
+                /* shave a hair off so rounding never pushes a card onto a new line */
+                f.style.width = (ratios[i] * row.mh + 2 * pads[i] - 0.6) + 'px';
+                f.style.height = (row.mh + row.extra + 2 * row.pad) + 'px';
+                var m = f.querySelector('.fig-media');
+                if (m) m.style.height = row.mh + 'px';
+            }
+        });
+
+        if (lead) {
+            /* hand the unused height back to the prose panel */
+            box.style.flex = '0 0 ' + Math.ceil(best.total) + 'px';
+            box.style.alignContent = 'flex-start';
+        } else {
+            /* spread small slack between rows; a large gap reads as a hole,
+               so centre the block instead */
+            var slack = H - best.total;
+            var perGap = rows.length > 1 ? slack / (rows.length - 1) : slack;
+            box.style.alignContent = slack <= 22 ? 'flex-start'
+                : (rows.length > 1 && perGap <= 60 ? 'space-between' : 'center');
+        }
+
+        /* caption heights change once the cards have their real widths, so
+           measure once more and settle the layout */
+        if (!pass) solveGrid(box, 1);
+        var res = { rows: rows };
+        box.dataset.rows = res.rows.length;
     }
 
     /* -------------------------------------------------------
@@ -503,6 +589,23 @@
     }
 
     /* -------------------------------------------------------
+       WORDING — telegraphic by default, full prose on demand
+       Every compressed line keeps its original sentence, so the
+       lecture wording is always one keypress away.
+       ------------------------------------------------------- */
+    function setTerse(on) {
+        state.terse = on;
+        $$('[data-full]').forEach(function (el) {
+            if (!el.dataset.terse) el.dataset.terse = el.innerHTML;
+            el.innerHTML = on ? el.dataset.terse : el.dataset.full;
+        });
+        document.body.classList.toggle('verbose', !on);
+        fitAll();
+        try { localStorage.setItem(LS + ':terse', on ? '1' : '0'); } catch (e) {}
+        toast(on ? 'Telegraphic wording' : 'Full lecture wording');
+    }
+
+    /* -------------------------------------------------------
        REAL-TIME EDITING
        Every text run on the slide is directly editable. The slide
        re-lays out as you type (auto-fit + figure grid re-solve),
@@ -755,6 +858,7 @@
             case 't': case 'T': toggleTheme(); break;
             case 'f': case 'F': toggleFull(); break;
             case 'e': case 'E': setEditing(!state.editing); break;
+            case 'w': case 'W': setTerse(!state.terse); break;
             case '?': openOv('#helpOverlay'); break;
             case 'Escape':
                 if (anyOpen()) closeAll();
@@ -789,6 +893,7 @@
                 else if (a === 'full') toggleFull();
                 else if (a === 'help') openOv('#helpOverlay');
                 else if (a === 'edit') setEditing(!state.editing);
+                else if (a === 'wording') setTerse(!state.terse);
                 else if (a === 'jump') openOv('#gridOverlay');
             });
         });
@@ -928,6 +1033,8 @@
         /* live re-layout while typing, then persist shortly after */
         document.addEventListener('input', function (e) {
             if (!e.target.isContentEditable) return;
+            var host = e.target.closest('[data-full]');
+            if (host) { delete host.dataset.full; delete host.dataset.terse; }
             clearTimeout(state._fitT);
             state._fitT = setTimeout(refitActive, 90);
             clearTimeout(state._save);
@@ -978,6 +1085,9 @@
         } catch (e) {}
 
         var restored = restoreDoc();
+        try {
+            if (localStorage.getItem(LS + ':terse') === '0') setTerse(false);
+        } catch (e) {}
 
         var start = 0;
         var m = /^#\/(\d+)$/.exec(location.hash);
@@ -994,9 +1104,18 @@
             fitAll();
             show(state.i, { silent: true });
             setTimeout(warmAll, 900);
+            /* late font/image work can nudge metrics — settle once more */
+            setTimeout(fitAll, 1800);
+            if (document.fonts && document.fonts.addEventListener) {
+                document.fonts.addEventListener('loadingdone', function () {
+                    clearTimeout(state._ft);
+                    state._ft = setTimeout(fitAll, 80);
+                });
+            }
         };
         if (document.fonts && document.fonts.ready) document.fonts.ready.then(run);
         else window.addEventListener('load', run);
+        window.addEventListener('load', function () { setTimeout(fitAll, 60); });
         window.addEventListener('resize', function () {
             clearTimeout(state._ft);
             state._ft = setTimeout(fitAll, 220);
@@ -1006,7 +1125,7 @@
 
         window.__deck = {
             show: show, fitAll: fitAll, state: state,
-            edit: setEditing, save: saveHtml, reset: resetDoc
+            edit: setEditing, save: saveHtml, reset: resetDoc, terse: setTerse
         };
     }
 

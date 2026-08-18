@@ -17,6 +17,7 @@ import os
 import re
 
 import meta
+from telegraph import telegraph, telegraph_html
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.normpath(os.path.join(HERE, ".."))
@@ -228,7 +229,9 @@ def bullets_html(paras):
             t.endswith(":") or (len(t) < 46 and not t.endswith("."))
         )
         cls = f"b b{lvl}" + (" b-head" if head else "")
-        out.append(f'<li class="{cls}"><span>{esc(t)}</span></li>')
+        tel = telegraph(t)
+        full = f' data-full="{esc(t)}"' if tel != t else ""
+        out.append(f'<li class="{cls}"><span{full}>{esc(tel)}</span></li>')
     return '<ul class="bullets">' + "".join(out) + "</ul>"
 
 
@@ -238,7 +241,11 @@ def table_html(rows):
     head, body = rows[0], rows[1:]
     th = "".join(f"<th>{esc(c)}</th>" for c in head)
     tb = "".join(
-        "<tr>" + "".join(f'<td>{esc(c).replace(chr(10), "<br>")}</td>' for c in r) + "</tr>"
+        "<tr>"
+        + "".join(
+            f'<td>{esc(telegraph(c)).replace(chr(10), "<br>")}</td>' for c in r
+        )
+        + "</tr>"
         for r in body
     )
     return f'<div class="tbl-wrap"><table class="tbl"><thead><tr>{th}</tr></thead><tbody>{tb}</tbody></table></div>'
@@ -246,12 +253,18 @@ def table_html(rows):
 
 def transcript_html(tr):
     if tr["kind"] == "bullets":
-        items = "".join(f'<li class="b b0"><span>{rich(i)}</span></li>' for i in tr["items"])
+        items = "".join(
+            f'<li class="b b0"><span data-full="{esc(rich(i))}">{telegraph_html(rich(i))}</span></li>'
+            for i in tr["items"]
+        )
         inner = f'<ul class="bullets">{items}</ul>'
     else:
         blocks = []
         for g in tr["groups"]:
-            items = "".join(f'<li class="b b1"><span>{rich(i)}</span></li>' for i in g["items"])
+            items = "".join(
+                f'<li class="b b1"><span data-full="{esc(rich(i))}">{telegraph_html(rich(i))}</span></li>'
+                for i in g["items"]
+            )
             blocks.append(
                 f'<div class="tg"><h4>{rich(g["head"])}</h4>'
                 + (f'<ul class="bullets">{items}</ul>' if items else "")
@@ -284,7 +297,12 @@ def grid_cols(figs, area):
 def figure_html(f, idx, n, cols=2):
     ratio = f["iw"] / max(f["ih"], 1)
     wide = "wide" if ratio > 2.0 else ("tall" if ratio < 0.62 else "")
-    caps = "".join(f'<p class="fig-cap">{esc(c)}</p>' for c in f["caps"])
+    def cap_html(c):
+        tel = telegraph(c)
+        attr = ' data-full="%s"' % esc(c) if tel != c else ""
+        return '<p class="fig-cap"%s>%s</p>' % (attr, esc(tel))
+
+    caps = "".join(cap_html(c) for c in f["caps"])
     chips = "".join(f'<span class="chip chip-annot">{esc(a)}</span>' for a in f["annots"])
     chiprow = f'<div class="fig-chips">{chips}</div>' if chips else ""
     alt = esc((f["caps"] + f["annots"] + ["Figure"])[0])[:140]
@@ -351,8 +369,12 @@ def body_html(c, n):
     return "".join(parts)
 
 
+MOTION = ["a", "b", "c", "d", "e"]
+
+
 def slide_html(n, c, layout, ch_idx, total):
     ch = meta.CHAPTERS[ch_idx]
+    motion = MOTION[(n * 2 + ch_idx) % len(MOTION)]
     accent, accent2 = ch[4], ch[5]
     area = "split" if layout == "split" else "full"
     cols = grid_cols(c["figures"], area)
@@ -400,7 +422,7 @@ def slide_html(n, c, layout, ch_idx, total):
             f'<span class="ctoc-range">{a}<em>–</em>{bnum}</span></li>'
             for i, (a, bnum, t, _s, c1, _c2) in enumerate(meta.CHAPTERS)
         )
-        return f"""<section class="slide s-cover" data-n="{n}" data-ch="{ch_idx}" style="--accent:{accent};--accent2:{accent2}">
+        return f"""<section class="slide s-cover" data-n="{n}" data-ch="{ch_idx}" data-motion="c" style="--accent:{accent};--accent2:{accent2}">
   <div class="slide-inner cover-inner">
     <div class="cover-glass glass reveal">
       <p class="cover-kicker">Rhinology &middot; Surgical Technique &amp; Safety</p>
@@ -421,7 +443,7 @@ def slide_html(n, c, layout, ch_idx, total):
 </section>"""
 
     if layout == "closing":
-        return f"""<section class="slide s-closing" data-n="{n}" data-ch="{ch_idx}" style="--accent:{accent};--accent2:{accent2}">
+        return f"""<section class="slide s-closing" data-n="{n}" data-ch="{ch_idx}" data-motion="c" style="--accent:{accent};--accent2:{accent2}">
   <div class="slide-inner closing-inner">
     <div class="closing-glass glass reveal">
       {figs}
@@ -433,7 +455,7 @@ def slide_html(n, c, layout, ch_idx, total):
 </section>"""
 
     if layout == "hero":
-        return f"""<section class="slide" data-n="{n}" data-ch="{ch_idx}" style="--accent:{accent};--accent2:{accent2}">
+        return f"""<section class="slide" data-n="{n}" data-ch="{ch_idx}" data-motion="{motion}" style="--accent:{accent};--accent2:{accent2}">
   <div class="slide-inner l-hero">
     {head}
     <div class="s-body hero-body reveal">
@@ -445,7 +467,7 @@ def slide_html(n, c, layout, ch_idx, total):
 </section>"""
 
     if layout == "gallery":
-        return f"""<section class="slide" data-n="{n}" data-ch="{ch_idx}" style="--accent:{accent};--accent2:{accent2}">
+        return f"""<section class="slide" data-n="{n}" data-ch="{ch_idx}" data-motion="{motion}" style="--accent:{accent};--accent2:{accent2}">
   <div class="slide-inner l-gallery">
     {head}
     <div class="s-body gal-body reveal">
@@ -459,22 +481,21 @@ def slide_html(n, c, layout, ch_idx, total):
     if layout == "text":
         plain = len(re.sub(r"<[^>]+>", "", body))
         wide = "two-col" if plain > 780 else ""
-        stmt = " stmt" if plain < 560 else ""
-        return f"""<section class="slide" data-n="{n}" data-ch="{ch_idx}" style="--accent:{accent};--accent2:{accent2}">
+        stmt = ""
+        return f"""<section class="slide" data-n="{n}" data-ch="{ch_idx}" data-motion="{motion}" style="--accent:{accent};--accent2:{accent2}">
   <div class="slide-inner l-text{stmt}">
     {head}
     <div class="s-body reveal">
       <div class="panel glass text-panel {wide}"><div class="panel-body"><div class="fit">{body}</div></div></div>
     </div>
   </div>
-  <div class="ch-mark" aria-hidden="true">{ch_idx + 1:02d}</div>
   <footer class="s-foot">{srcbar}</footer>
 </section>"""
 
     # split — the prose/figure ratio follows how much text the slide carries
     chars = len(re.sub(r"<[^>]+>", "", body))
     dens = " stacked" if chars > 1750 else (" dense" if chars > 1050 else "")
-    return f"""<section class="slide" data-n="{n}" data-ch="{ch_idx}" style="--accent:{accent};--accent2:{accent2}">
+    return f"""<section class="slide" data-n="{n}" data-ch="{ch_idx}" data-motion="{motion}" style="--accent:{accent};--accent2:{accent2}">
   <div class="slide-inner l-split">
     {head}
     <div class="s-body split-body{dens} reveal">

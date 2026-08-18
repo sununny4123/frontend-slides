@@ -436,7 +436,9 @@ html[data-theme="light"] .vignette { background: radial-gradient(120% 100% at 50
     z-index: 2;
 }
 .panel-body { flex: 1 1 auto; min-height: 0; overflow: hidden; position: relative; z-index: 1; }
-.fit { --fit: 1; }
+/* the trailing padding absorbs the few px that late font metrics shift,
+   so the last line is never shaved even if a measure drifts */
+.fit { --fit: 1; padding-bottom: 14px; }
 
 .bullets { list-style: none; }
 
@@ -621,8 +623,9 @@ html[data-theme="light"] .vignette { background: radial-gradient(120% 100% at 50
 .fig {
     display: flex;
     flex-direction: column;
+    flex: 0 0 auto;
     min-height: 0;
-    padding: 14px;
+    padding: 12px;
     cursor: zoom-in;
     background: var(--plate-bg);
     border-color: var(--plate-brd);
@@ -642,7 +645,7 @@ html[data-theme="light"] .vignette { background: radial-gradient(120% 100% at 50
 
 .fig-media {
     position: relative;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     min-height: 0;
     display: flex;
     align-items: center;
@@ -654,10 +657,8 @@ html[data-theme="light"] .vignette { background: radial-gradient(120% 100% at 50
 }
 
 .fig-media img {
-    max-width: 100%;
-    max-height: 100%;
-    width: auto;
-    height: auto;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
     border-radius: 10px;
     display: block;
@@ -755,21 +756,15 @@ html[data-theme="light"] .vignette { background: radial-gradient(120% 100% at 50
 .split-body.stacked .text-panel .fit { column-count: 2; column-gap: 40px; height: 100%; }
 .split-body.stacked .text-panel .fit .b { break-inside: avoid; }
 
-.split-figs, .gal-grid, .hero-figs, .cover-figs {
-    display: grid;
-    gap: 18px;
+.split-figs, .gal-grid, .hero-figs {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    justify-content: flex-start;
+    gap: 16px;
     min-height: 0;
-    align-content: stretch;
-    grid-auto-rows: minmax(0, 1fr);
+    overflow: hidden;
 }
-
-/* column count and per-figure spans are decided at build time from the
-   figure count and each image's aspect ratio */
-.split-figs, .gal-grid, .hero-figs, .cover-figs {
-    grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
-}
-
-.fig.span2 { grid-column: span 2; }
 
 /* dense instrument boards get tighter cards */
 [data-cols="4"] .fig, [data-cols="5"] .fig, [data-cols="6"] .fig {
@@ -787,23 +782,14 @@ html[data-theme="light"] .vignette { background: radial-gradient(120% 100% at 50
 
 /* --- layout: gallery (lead + grid) --- */
 .gal-body { display: flex; flex-direction: column; gap: 20px; height: 100%; min-height: 0; }
-.gal-lead { flex: 0 0 auto; max-height: 42%; padding: 24px 30px; }
-.gal-grid { flex: 1 1 auto; min-height: 0; }
+.gal-lead { flex: 1 1 auto; min-height: 0; padding: 22px 28px; }
+.gal-grid { flex: 0 0 auto; min-height: 0; }
 
 /* --- layout: text only --- */
 .text-panel { height: 100%; }
 
-/* a single column of prose gets a comfortable measure instead of the full stage */
-.l-text .text-panel:not(.two-col) { max-width: 1290px; margin: 0 auto; }
-
-/* short text-only slides read as statements, not as an empty sheet:
-   the card hugs its text instead of stretching to the full stage */
-.l-text.stmt .s-body { display: flex; align-items: center; }
-.l-text.stmt .text-panel { max-width: 1180px; margin: 0; height: auto; max-height: 100%; }
-.l-text.stmt .panel-body { flex: 0 1 auto; justify-content: center; }
-.l-text.stmt .b0 { font-size: calc(var(--body-size) * var(--fit, 1) * 1.22); line-height: 1.32; }
-.l-text.stmt .b0.b-head { font-size: calc(var(--body-size) * var(--fit, 1) * 1.34); }
-.l-text.stmt .b1 { font-size: calc(var(--sub-size) * var(--fit, 1) * 1.12); }
+/* text-only slides fill the stage; the type scales up to meet it */
+.l-text .text-panel { max-width: none; margin: 0; }
 
 /* chapter numeral watermark fills the space a short slide leaves behind */
 .ch-mark {
@@ -952,11 +938,79 @@ kbd {
 /* ===========================================================
    SLIDE MOTION — direction-aware, and a beat between chapters
    =========================================================== */
-.slide.enter-fwd .slide-inner { animation: inFwd .5s var(--ease) both; }
-.slide.enter-back .slide-inner { animation: inBack .5s var(--ease) both; }
+/* Five motion families, cycled across the deck so no two neighbouring
+   slides arrive the same way. Each family moves the header, the prose
+   panel and the figures on its own curve and its own delay. */
+.slide.enter-fwd .slide-inner,
+.slide.enter-back .slide-inner { animation: shellIn .42s var(--ease) both; }
 
-@keyframes inFwd { from { opacity: 0; transform: translateX(38px); } to { opacity: 1; transform: none; } }
-@keyframes inBack { from { opacity: 0; transform: translateX(-38px); } to { opacity: 1; transform: none; } }
+@keyframes shellIn { from { opacity: 0; } to { opacity: 1; } }
+
+.slide[data-motion] .s-head,
+.slide[data-motion] .panel,
+.slide[data-motion] .figbox .fig,
+.slide[data-motion] .bcols { animation-fill-mode: both; }
+
+/* stagger the figures inside whichever family is playing */
+.slide.enter-fwd .figbox .fig:nth-child(2), .slide.enter-back .figbox .fig:nth-child(2) { animation-delay: .05s; }
+.slide.enter-fwd .figbox .fig:nth-child(3), .slide.enter-back .figbox .fig:nth-child(3) { animation-delay: .10s; }
+.slide.enter-fwd .figbox .fig:nth-child(4), .slide.enter-back .figbox .fig:nth-child(4) { animation-delay: .15s; }
+.slide.enter-fwd .figbox .fig:nth-child(5), .slide.enter-back .figbox .fig:nth-child(5) { animation-delay: .20s; }
+.slide.enter-fwd .figbox .fig:nth-child(6), .slide.enter-back .figbox .fig:nth-child(6) { animation-delay: .24s; }
+.slide.enter-fwd .figbox .fig:nth-child(n+7), .slide.enter-back .figbox .fig:nth-child(n+7) { animation-delay: .28s; }
+
+/* --- A: lift — everything rises off the floor ------------------------- */
+[data-motion="a"].enter-fwd .s-head, [data-motion="a"].enter-back .s-head { animation: mALift .55s var(--ease); }
+[data-motion="a"].enter-fwd .panel, [data-motion="a"].enter-back .panel { animation: mALift .62s var(--ease) .07s; }
+[data-motion="a"].enter-fwd .fig, [data-motion="a"].enter-back .fig { animation: mALift .55s var(--ease); }
+@keyframes mALift { from { opacity: 0; transform: translateY(34px); } to { opacity: 1; transform: none; } }
+
+/* --- B: split — text enters from the left, figures from the right ----- */
+[data-motion="b"].enter-fwd .s-head, [data-motion="b"].enter-back .s-head { animation: mBHead .5s var(--ease); }
+[data-motion="b"].enter-fwd .panel, [data-motion="b"].enter-back .panel { animation: mBLeft .6s var(--ease) .05s; }
+[data-motion="b"].enter-fwd .fig, [data-motion="b"].enter-back .fig { animation: mBRight .58s var(--ease); }
+@keyframes mBHead { from { opacity: 0; transform: translateY(-18px); } to { opacity: 1; transform: none; } }
+@keyframes mBLeft { from { opacity: 0; transform: translateX(-52px); } to { opacity: 1; transform: none; } }
+@keyframes mBRight { from { opacity: 0; transform: translateX(46px); } to { opacity: 1; transform: none; } }
+
+/* --- C: focus — the slide settles out of a soft zoom ------------------ */
+[data-motion="c"].enter-fwd .s-head, [data-motion="c"].enter-back .s-head { animation: mCZoom .58s var(--ease); }
+[data-motion="c"].enter-fwd .panel, [data-motion="c"].enter-back .panel { animation: mCZoom .66s var(--ease) .06s; }
+[data-motion="c"].enter-fwd .fig, [data-motion="c"].enter-back .fig { animation: mCPop .55s var(--ease); }
+@keyframes mCZoom { from { opacity: 0; transform: scale(.955); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes mCPop { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: none; } }
+
+/* --- D: wipe — content is revealed behind a moving edge --------------- */
+[data-motion="d"].enter-fwd .s-head, [data-motion="d"].enter-back .s-head { animation: mDWipe .6s var(--ease); }
+[data-motion="d"].enter-fwd .panel, [data-motion="d"].enter-back .panel { animation: mDWipe .72s var(--ease) .06s; }
+[data-motion="d"].enter-fwd .fig, [data-motion="d"].enter-back .fig { animation: mDWipeUp .6s var(--ease); }
+@keyframes mDWipe {
+    from { opacity: 0; clip-path: inset(0 100% 0 0); }
+    to { opacity: 1; clip-path: inset(0 0 0 0); }
+}
+@keyframes mDWipeUp {
+    from { opacity: 0; clip-path: inset(100% 0 0 0); transform: translateY(12px); }
+    to { opacity: 1; clip-path: inset(0 0 0 0); transform: none; }
+}
+
+/* --- E: fan — cards swing in with a touch of rotation ----------------- */
+[data-motion="e"].enter-fwd .s-head, [data-motion="e"].enter-back .s-head { animation: mELift .5s var(--ease); }
+[data-motion="e"].enter-fwd .panel, [data-motion="e"].enter-back .panel { animation: mETilt .64s var(--ease) .05s; }
+[data-motion="e"].enter-fwd .fig, [data-motion="e"].enter-back .fig { animation: mEFan .6s var(--ease); }
+@keyframes mELift { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
+@keyframes mETilt { from { opacity: 0; transform: perspective(1400px) rotateX(7deg) translateY(26px); } to { opacity: 1; transform: none; } }
+@keyframes mEFan { from { opacity: 0; transform: perspective(1200px) rotateY(-9deg) translateX(28px); } to { opacity: 1; transform: none; } }
+
+/* going backwards mirrors the horizontal families */
+[data-motion="b"].enter-back .panel { animation-name: mBRight; }
+[data-motion="b"].enter-back .fig { animation-name: mBLeft; }
+[data-motion="d"].enter-back .s-head, [data-motion="d"].enter-back .panel { animation-name: mDWipeBack; }
+@keyframes mDWipeBack {
+    from { opacity: 0; clip-path: inset(0 0 0 100%); }
+    to { opacity: 1; clip-path: inset(0 0 0 0); }
+}
+[data-motion="e"].enter-back .fig { animation-name: mEFanBack; }
+@keyframes mEFanBack { from { opacity: 0; transform: perspective(1200px) rotateY(9deg) translateX(-28px); } to { opacity: 1; transform: none; } }
 
 .ch-beat {
     position: fixed;
@@ -1020,7 +1074,8 @@ kbd {
 .ch-beat.on .cb-range { opacity: 1; transform: none; transition-delay: .14s; }
 
 @media (prefers-reduced-motion: reduce) {
-    .slide.enter-fwd .slide-inner, .slide.enter-back .slide-inner { animation: none; }
+    .slide.enter-fwd .slide-inner, .slide.enter-back .slide-inner,
+    .slide[data-motion] .s-head, .slide[data-motion] .panel, .slide[data-motion] .fig { animation: none !important; }
     .ch-beat { display: none !important; }
 }
 
@@ -1039,14 +1094,7 @@ kbd {
 .slide.visible .reveal:nth-child(1) { transition-delay: .06s; }
 .slide.visible .reveal:nth-child(2) { transition-delay: .16s; }
 .slide.visible .reveal:nth-child(3) { transition-delay: .26s; }
-.slide.visible .fig { animation: figIn .7s var(--ease) both; }
-.slide.visible .fig:nth-child(2) { animation-delay: .06s; }
-.slide.visible .fig:nth-child(3) { animation-delay: .12s; }
-.slide.visible .fig:nth-child(4) { animation-delay: .18s; }
-.slide.visible .fig:nth-child(5) { animation-delay: .24s; }
-.slide.visible .fig:nth-child(n+6) { animation-delay: .3s; }
 
-@keyframes figIn { from { opacity: 0; transform: translateY(16px) scale(.985); } to { opacity: 1; transform: none; } }
 
 /* ===========================================================
    CHROME — progress, rail, dock
