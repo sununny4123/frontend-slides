@@ -735,6 +735,11 @@ body.editing .edit-badge{ display:flex; }
    live editor mutates it and re-renders. Nothing is hard-coded.
    ========================================================= */
 const A = 'assets/';
+/* Asset resolver. Here it is the identity function — the deck loads its images and
+   videos from the assets/ folder. The self-contained single-file build replaces D and U
+   with an embedded data-URI map, so every src below keeps working unchanged. */
+const D = null;
+const U = p => p;
 const CITE = {
   cum:  "Cummings Otolaryngology, 7th ed. — Cerebrospinal Fluid Rhinorrhea",
   bail: "Bailey's Head & Neck Surgery–Otolaryngology, 5th ed. — Endoscopic evaluation and treatment of CSF leaks",
@@ -1900,7 +1905,7 @@ function bulletList(items, base, cls){
 }
 function figCard(f, path, extra){
   return '<figure class="fig '+(f.fit==='cover'?'crop':'')+' '+(extra||'')+'" data-img="'+f.src+'">'+
-    '<div class="frame"><img src="'+f.src+'" alt="" loading="lazy"></div>'+
+    '<div class="frame"><img src="'+U(f.src)+'" alt="" loading="lazy"></div>'+
     '<span class="zoom-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l4.5 4.5M8 10.5h5M10.5 8v5"/></svg></span>'+
     (f.cap!==undefined ? '<figcaption'+E(path+'.cap')+'>'+(f.cap||'')+'</figcaption>' : '')+
   '</figure>';
@@ -2155,9 +2160,9 @@ L.video = s => `
       </div>
       <div class="rv scope glow" style="flex:1;min-width:0">
         <div class="scope-in">
-          <video poster="${s.video.poster||''}" controls preload="metadata" playsinline style="background:#0C0820">
-            <source src="${s.video.src.replace(/\.mp4$/,'.webm')}" type="video/webm">
-            <source src="${s.video.src}" type="video/mp4">
+          <video poster="${s.video.poster?U(s.video.poster):''}" controls preload="metadata" playsinline style="background:#0C0820">
+            <source src="${U(s.video.src.replace(/\.mp4$/,'.webm'))}" type="video/webm">
+            <source src="${U(s.video.src)}" type="video/mp4">
           </video>
         </div>
       </div>
@@ -2196,7 +2201,7 @@ L.hotspot = s => `
     <div class="body-area">
       <div class="rv hot-wrap scope" style="flex:1;min-width:0;padding:12px">
         <div class="scope-in" id="hotImg" style="border-radius:30px">
-          <img src="${s.media.src}" alt="" style="object-fit:contain;background:#0B0818" id="hotScan">
+          <img src="${U(s.media.src)}" alt="" style="object-fit:contain;background:#0B0818" id="hotScan">
           ${(s.spots||[]).map((sp,i)=>`<button class="hot" data-spot="${i}" style="left:${sp.x}%;top:${sp.y}%;transform:translate(-50%,-50%)">${sp.n}</button>`).join('')}
         </div>
       </div>
@@ -2296,8 +2301,8 @@ L.compare = s => `
       </div>
       <div class="rv scope glow" style="flex:1;min-width:0;padding:12px">
         <div class="cmp" id="cmpBox" style="height:100%;border-radius:32px">
-          <img src="${s.cmp.after}" alt="">
-          <img src="${s.cmp.before}" class="top" alt="">
+          <img src="${U(s.cmp.after)}" alt="">
+          <img src="${U(s.cmp.before)}" class="top" alt="">
           <div class="handle"></div>
           <span class="lab" style="left:16px">${s.cmp.labA}</span>
           <span class="lab" style="right:16px">${s.cmp.labB}</span>
@@ -2441,7 +2446,7 @@ function openLb(src){
 }
 function lbShow(){
   const src = lbList[lbAt];
-  $('#lbImg').src = src;
+  $('#lbImg').src = U(src);
   lbZ = 1; lbX = 0; lbY = 0; lbApply();
   const fig = $$('.slide.active [data-img]').find(n => n.dataset.img === src);
   const cap = fig ? $('figcaption', fig) : null;
@@ -2894,7 +2899,7 @@ function renderSlidePane(){
   if (s.figs)  h += `<div class="ed-sec"><label>Figures</label><div class="ed-list">
       ${s.figs.map((f,i)=>`<div class="ed-item" style="flex-direction:column;align-items:stretch;gap:6px;cursor:default">
         <div style="display:flex;gap:8px;align-items:center"><span class="n">${i+1}</span>
-          <img src="${f.src}" style="width:38px;height:28px;object-fit:cover;border-radius:6px">
+          <img src="${U(f.src)}" style="width:38px;height:28px;object-fit:cover;border-radius:6px">
           <div style="flex:1"></div><button class="x" data-arr-del="figs.${i}">✕</button></div>
         <input class="ed-in" data-field="figs.${i}.src" value="${esc(f.src)}">
         <textarea class="ed-ta" style="min-height:56px" data-field="figs.${i}.cap" placeholder="Caption">${esc(f.cap)}</textarea>
@@ -3038,7 +3043,7 @@ function renderFilePane(){
       <p class="ed-hint">Load a deck JSON exported earlier.</p>
     </div>
     <div class="ed-sec"><label>Image library — ${ASSETS.length} files</label>
-      <div class="asset-grid">${ASSETS.map(a=>`<img src="${A+a}" title="${a}" data-asset="${A+a}" loading="lazy">`).join('')}</div>
+      <div class="asset-grid">${ASSETS.map(a=>`<img src="${U(A+a)}" title="${a}" data-asset="${A+a}" loading="lazy">`).join('')}</div>
       <p class="ed-hint">Click an image while a “Choose image” slot is armed in the Slide tab.</p>
     </div>
     <div class="ed-sec"><label>Keyboard</label>
@@ -3075,7 +3080,25 @@ function renderFilePane(){
 }
 let pickTarget = null;
 
-function download(name, text, mime){
+/* Hand a generated file to the reader. A plain blob link works when the deck is
+   opened as a file; a published page has no download permission of its own and
+   must go through the viewer's save prompt instead. */
+async function download(name, text, mime){
+  const host = (typeof window.claude === 'object' && window.claude && typeof window.claude.use === 'function')
+    ? await window.claude.use('downloads').catch(() => null) : null;
+  if (host){
+    try { await host.save({ filename: name, data: text }); toast('Saved ' + name); }
+    catch(e){
+      const code = e && e.code;
+      if (code === 'declined')                toast('Save cancelled');
+      else if (code === 'too_large')          toast('That file is too large to save from this page');
+      else if (code === 'rate_limited')       toast('One save at a time — try again in a moment');
+      else if (code === 'rejected_extension' || code === 'extension_not_enabled')
+        toast('This viewer cannot save .' + name.split('.').pop() + ' files — export the deck as JSON instead');
+      else                                    toast('Saving is not available in this view');
+    }
+    return;
+  }
   const b = new Blob([text], { type: mime||'text/plain' });
   const u = URL.createObjectURL(b);
   const a = document.createElement('a'); a.href = u; a.download = name; a.click();
@@ -3094,7 +3117,6 @@ function exportHtml(){
   sc.textContent = `DECK.slides=${JSON.stringify(DECK.slides)};DECK.meta=${JSON.stringify(DECK.meta)};THEME=${JSON.stringify(THEME)};applyTheme();mount(false);`;
   doc.querySelector('body').appendChild(sc);
   download('csf-rhinorrhea-deck.html', '<!DOCTYPE html>\n' + doc.outerHTML, 'text/html');
-  toast('Standalone HTML exported — keep it beside the assets folder');
 }
 
 /* ---------- persistence ---------- */
@@ -3182,7 +3204,7 @@ addEventListener('hashchange', () => {
 /* Preload the images of the next slide so transitions never flash */
 addEventListener('load', () => {
   setTimeout(() => {
-    ASSETS.slice(0, 24).forEach(a => { const i = new Image(); i.src = A + a; });
+    ASSETS.slice(0, 24).forEach(a => { const i = new Image(); i.src = U(A + a); });
   }, 1200);
 });
 </script>

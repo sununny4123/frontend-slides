@@ -57,6 +57,14 @@ into DOM — so edits apply instantly.
 Edits autosave to the browser as you type (`Ctrl+S` to save immediately, `Ctrl+Z` / `Ctrl+Shift+Z`
 to undo and redo). An exported HTML file needs the `assets/` folder beside it.
 
+## Publishing it as one file
+
+`build-artifact.py` bundles the deck into a single self-contained page — webfonts and every
+referenced image and video inlined as data URIs — for hosting somewhere that cannot serve the
+`assets/` folder. It swaps the deck's asset resolver (`U`, the identity function here) for one
+backed by the embedded map; nothing else changes. Point `VID` at smaller video re-encodes if the
+host caps page size.
+
 ## Exporting a handout
 
 Print the page (`Ctrl+P`) at 1920×1080 landscape with background graphics on — the print
