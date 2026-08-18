@@ -646,6 +646,9 @@ html[data-theme="light"] .vignette { background: radial-gradient(120% 100% at 50
 /* --- layout: text only --- */
 .text-panel { height: 100%; }
 
+/* a single column of prose gets a comfortable measure instead of the full stage */
+.l-text .text-panel:not(.two-col) { max-width: 1290px; margin: 0 auto; }
+
 /* short prose sits centred in its panel instead of hugging the top */
 .text-panel > .panel-body { display: flex; flex-direction: column; justify-content: center; }
 .split-body.stacked .text-panel > .panel-body { display: block; }
@@ -1173,3 +1176,58 @@ body.editing .fig { cursor: default; }
 
 /* stacked split panels fill their row, so those columns are measured horizontally */
 .split-body.stacked .text-panel .fit { height: 100%; }
+
+
+/* ===========================================================
+   PRINT / PDF THEME
+   Chrome's print pipeline drops backdrop-filter layers, and the
+   screen palette is light-on-dark. Printing therefore switches to
+   an opaque, ink-on-paper version of the same design.
+   =========================================================== */
+@media print {
+    :root, html[data-theme="dark"], html[data-theme="light"] {
+        --bg-0: #ffffff;
+        --bg-1: #ffffff;
+        --bg-2: #f2f6f9;
+        --ink: #10222e;
+        --ink-soft: #24404f;
+        --ink-mute: #4a6675;
+        --ink-faint: #6b8494;
+        --glass-brd: #d7e1e8;
+        --glass-brd-soft: #e2eaef;
+        --glass-hi: transparent;
+        --glass-shadow: none;
+        --blur: 0px;
+    }
+
+    body { background: #fff !important; color: var(--ink); }
+
+    /* only the on-screen slide carries .visible, so reveal every slide's
+       staggered content for print */
+    .reveal, .fig {
+        opacity: 1 !important;
+        transform: none !important;
+        animation: none !important;
+    }
+
+    .glass, .panel, .fig, .gal-lead, .side-note, .cover-glass, .closing-glass {
+        background: #fff !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        box-shadow: none !important;
+        border: 1px solid var(--glass-brd) !important;
+    }
+
+    .glass::after { display: none !important; }
+
+    .fig-media { background: #fff !important; }
+    .fig-zoom { display: none !important; }
+
+    .slide { background: #fff !important; border-bottom: 1px solid #e6edf1; }
+
+    .transcript b, .transcript strong { background: none; text-decoration: underline; }
+
+    .src { background: #f4f8fa !important; color: var(--ink-mute) !important; max-width: none; }
+    .sources { max-width: 100%; }
+    .chip { background: #f4f8fa !important; }
+}

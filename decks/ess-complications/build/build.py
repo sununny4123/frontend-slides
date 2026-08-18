@@ -94,6 +94,8 @@ def classify(n, shapes, imgmap):
     for sh in flat:
         if sh["type"] == "image":
             info = imgmap[sh["src"]]
+            if info.get("blank"):
+                continue                     # flat spacer bitmaps carry no content
             figures.append(
                 {
                     "file": info["file"],

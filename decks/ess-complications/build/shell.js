@@ -147,6 +147,18 @@
         preload(state.i + 2);
     }
 
+    /* After first paint, quietly upgrade every remaining figure to eager so
+       jumping around — and printing to PDF — never waits on a lazy fetch. */
+    function warmAll() {
+        var imgs = $$('img[loading="lazy"]');
+        var i = 0;
+        (function step() {
+            var end = Math.min(i + 12, imgs.length);
+            for (; i < end; i++) imgs[i].loading = 'eager';
+            if (i < imgs.length) setTimeout(step, 120);
+        })();
+    }
+
     function preload(idx) {
         var s = slides[idx];
         if (!s) return;
@@ -711,6 +723,11 @@
             document.body.classList.toggle('dock-lit', e.clientY > window.innerHeight - 120);
         });
 
+        /* printing needs every figure decoded, not just the ones near the cursor */
+        window.addEventListener('beforeprint', function () {
+            $$('img[loading="lazy"]').forEach(function (im) { im.loading = 'eager'; });
+        });
+
         window.addEventListener('hashchange', function () {
             var m = /^#\/(\d+)$/.exec(location.hash);
             if (m) show(+m[1] - 1, { silent: true });
@@ -743,7 +760,11 @@
         }
         show(clamp(start, 0, total - 1));
 
-        var run = function () { fitAll(); show(state.i, { silent: true }); };
+        var run = function () {
+            fitAll();
+            show(state.i, { silent: true });
+            setTimeout(warmAll, 900);
+        };
         if (document.fonts && document.fonts.ready) document.fonts.ready.then(run);
         else window.addEventListener('load', run);
         window.addEventListener('resize', function () {
