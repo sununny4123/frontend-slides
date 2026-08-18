@@ -1,0 +1,2409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESS &amp; Its Complications</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..800;1,6..96,400..700&family=Archivo:wght@400;500;600;700&family=Azeret+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ===========================================
+   0. RESET
+   =========================================== */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ===========================================
+   1. FIXED 16:9 STAGE — MANDATORY BASE
+   (verbatim viewport-base.css; app chrome overrides follow in §3)
+   Slides are authored at 1920x1080 and scaled as a whole.
+   =========================================== */
+html, body {
+    width: 100%; height: 100%; margin: 0;
+    overflow: hidden;
+    background: var(--stage-bg, #000);
+}
+.deck-viewport {
+    position: fixed; inset: 0; overflow: hidden;
+    background: var(--stage-bg, #000);
+}
+.deck-stage {
+    position: absolute; left: 0; top: 0;
+    width: 1920px; height: 1080px;
+    overflow: hidden; transform-origin: 0 0;
+    background: var(--slide-bg, #fff);
+}
+.slide {
+    position: absolute; inset: 0;
+    width: 1920px; height: 1080px;
+    overflow: hidden; display: block;
+    visibility: hidden; opacity: 0; pointer-events: none;
+    background: var(--slide-bg, #fff);
+}
+.slide.active, .slide.visible {
+    visibility: visible; opacity: 1; pointer-events: auto; z-index: 1;
+}
+img, video, canvas, svg { max-width: 100%; max-height: 100%; }
+.deck-controls { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 1000; }
+@media print {
+    html, body { width: 1920px; height: auto; overflow: visible; background: #fff; }
+    .deck-viewport { position: static; overflow: visible; background: #fff; }
+    .deck-stage { position: static; width: auto; height: auto; transform: none !important; background: none; }
+    .slide {
+        position: relative; display: block !important; visibility: visible !important;
+        opacity: 1 !important; pointer-events: auto !important;
+        width: 1920px; height: 1080px; break-after: page; page-break-after: always;
+    }
+    .slide:last-child { break-after: auto; page-break-after: auto; }
+    .deck-controls, .appbar, .view-edit, .overview, .notes-panel { display: none !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.2s !important; }
+}
+
+/* ===========================================
+   2. THEME TOKENS — "ATLAS PLATE"
+   Engraved-plate anatomical atlas: bone paper, iron-gall ink,
+   surgical-marker vermilion. Change these to restyle the deck.
+   =========================================== */
+:root {
+    /* Paper + ink */
+    --paper:      #EFE9DC;
+    --paper-2:    #E6DECD;
+    --paper-3:    #DCD2BE;
+    --ink:        #18202A;
+    --ink-2:      #414C58;
+    --ink-3:      #6E7883;
+    --rule:       rgba(24, 32, 42, 0.20);
+    --rule-soft:  rgba(24, 32, 42, 0.10);
+
+    /* Accents (swappable from the Edit tab) */
+    --accent:     #B23A16;   /* vermilion — surgical marker */
+    --accent-2:   #1C6560;   /* endoscope teal */
+    --accent-3:   #A8791F;   /* ochre — caution */
+    --accent-ink: #FFFFFF;
+
+    /* Semantic */
+    --danger:     #A32617;
+    --safe:       #1C6560;
+
+    /* App chrome (outside the slide stage) */
+    --chrome:     #12181F;
+    --chrome-2:   #1B232C;
+    --chrome-3:   #2A3540;
+    --chrome-tx:  #E8E2D6;
+    --chrome-tx2: #96A0AB;
+    --chrome-h:   58px;
+
+    --stage-bg:   #0C1116;
+    --slide-bg:   var(--paper);
+
+    /* Type — authored at 1920x1080 stage size */
+    --font-display: 'Bodoni Moda', 'Bodoni MT', Didot, Georgia, serif;
+    --font-body:    'Archivo', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --font-mono:    'Azeret Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+    --t-title:    92px;
+    --t-h2:       62px;
+    --t-h3:       34px;
+    --t-body:     26px;
+    --t-small:    21px;
+    --t-label:    16px;
+
+    /* Spacing */
+    --pad:        88px;
+    --gap:        30px;
+
+    /* Motion */
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --dur: 0.62s;
+}
+:root[data-accent="teal"]  { --accent: #1C6560; --accent-2: #B23A16; --accent-3: #A8791F; }
+:root[data-accent="ink"]   { --accent: #2B3947; --accent-2: #6E7883; --accent-3: #A8791F; }
+:root[data-accent="ochre"] { --accent: #A8791F; --accent-2: #1C6560; --accent-3: #B23A16; }
+
+body {
+    font-family: var(--font-body);
+    background: var(--chrome);
+    color: var(--chrome-tx);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ===========================================
+   3. APP SHELL — top bar with PRESENT / EDIT tabs
+   =========================================== */
+.app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+
+.appbar {
+    position: relative; z-index: 900;
+    flex: 0 0 var(--chrome-h);
+    display: flex; align-items: center; gap: 18px;
+    padding: 0 16px 0 20px;
+    background: var(--chrome);
+    border-bottom: 1px solid #26313C;
+}
+.app[data-focus="on"] .appbar { display: none; }
+
+.brand { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.brand-mark {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 2px; padding: 3px 7px;
+}
+.brand-title {
+    font-family: var(--font-display); font-size: 17px; font-weight: 500;
+    color: var(--chrome-tx); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; max-width: 42vw;
+}
+
+/* Segmented PRESENT / EDIT control */
+.tabs {
+    display: flex; gap: 2px; padding: 3px;
+    background: var(--chrome-2); border: 1px solid #2C3742; border-radius: 3px;
+    margin-left: auto;
+}
+.tab {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--chrome-tx2);
+    background: none; border: 0; border-radius: 2px;
+    padding: 7px 18px; cursor: pointer; transition: background .18s, color .18s;
+}
+.tab:hover { color: var(--chrome-tx); }
+.tab[aria-selected="true"] { background: var(--accent); color: #fff; }
+
+.bar-actions { display: flex; align-items: center; gap: 6px; margin-left: 8px; }
+.iconbtn {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--chrome-tx2);
+    background: var(--chrome-2); border: 1px solid #2C3742; border-radius: 3px;
+    padding: 7px 11px; cursor: pointer; transition: all .18s;
+}
+.iconbtn:hover { color: var(--chrome-tx); border-color: #46535F; background: var(--chrome-3); }
+.iconbtn.on { color: #fff; background: var(--accent-2); border-color: var(--accent-2); }
+.iconbtn svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+.save-flag { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--chrome-tx2); opacity: 0; transition: opacity .3s; }
+.save-flag.show { opacity: 1; }
+
+/* Views */
+.view { position: relative; flex: 1 1 auto; min-height: 0; display: none; }
+.view.on { display: block; }
+.view-edit.on { display: grid; grid-template-columns: 268px minmax(0,1fr) 330px; }
+
+/* ===========================================
+   4. PRESENT VIEW
+   =========================================== */
+/* Override base .deck-viewport so the stage lives under the app bar */
+.view-present .deck-viewport { position: absolute; inset: 0; }
+
+.deck-controls {
+    position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 12px;
+    padding: 7px 10px; border-radius: 4px;
+    background: rgba(12, 17, 22, .78); border: 1px solid rgba(255,255,255,.09);
+    backdrop-filter: blur(8px);
+    opacity: 0; transition: opacity .35s; z-index: 60;
+}
+.view-present:hover .deck-controls, .deck-controls:focus-within { opacity: 1; }
+.navbtn {
+    width: 30px; height: 30px; display: grid; place-items: center;
+    background: none; border: 1px solid rgba(255,255,255,.14); border-radius: 3px;
+    color: var(--chrome-tx); cursor: pointer; transition: all .18s;
+}
+.navbtn:hover { background: rgba(255,255,255,.1); }
+.navbtn svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; }
+.counter { font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; color: var(--chrome-tx); min-width: 66px; text-align: center; }
+.keyhint { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--chrome-tx2); padding-left: 10px; margin-left: 4px; border-left: 1px solid rgba(255,255,255,.12); }
+@media (max-width: 860px) { .keyhint { display: none; } }
+.counter b { color: var(--accent); font-weight: 600; }
+
+.progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(255,255,255,.07); z-index: 60; }
+.progress span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .45s var(--ease); }
+
+/* Speaker notes drawer */
+.notes-panel {
+    position: absolute; right: 0; top: 0; bottom: 0; width: 380px; z-index: 70;
+    background: rgba(14, 19, 25, .96); border-left: 1px solid #26313C;
+    padding: 26px 26px 40px; overflow-y: auto;
+    transform: translateX(100%); transition: transform .4s var(--ease);
+}
+.notes-panel.on { transform: none; }
+.notes-panel h4 {
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 14px;
+}
+.notes-panel .nt { font-size: 15px; line-height: 1.62; color: #CFD6DD; white-space: pre-wrap; }
+.notes-panel .nt-title { font-family: var(--font-display); font-size: 22px; color: #fff; margin-bottom: 12px; }
+
+/* Overview grid (press O) */
+.overview {
+    position: absolute; inset: 0; z-index: 80; display: none;
+    background: rgba(10, 14, 19, .97); padding: 30px 34px; overflow-y: auto;
+}
+.overview.on { display: block; }
+.overview-head {
+    display: flex; align-items: baseline; gap: 14px; margin-bottom: 20px;
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--chrome-tx2);
+}
+.ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 12px; }
+.ov-card {
+    text-align: left; cursor: pointer; padding: 14px 15px 16px; min-height: 104px;
+    background: var(--chrome-2); border: 1px solid #2A3540; border-radius: 3px;
+    color: var(--chrome-tx); transition: all .18s; display: flex; flex-direction: column; gap: 7px;
+}
+.ov-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.ov-card.cur { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.ov-n { font-family: var(--font-mono); font-size: 10px; letter-spacing: .14em; color: var(--accent); }
+.ov-k { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--chrome-tx2); }
+.ov-t { font-family: var(--font-display); font-size: 16px; line-height: 1.28; }
+
+/* ===========================================
+   5. EDIT VIEW
+   =========================================== */
+.ed-col { background: var(--chrome); overflow-y: auto; min-height: 0; }
+.ed-list { border-right: 1px solid #26313C; padding: 12px 10px 40px; }
+.ed-inspector { border-left: 1px solid #26313C; padding: 16px 16px 60px; }
+
+.ed-secttl {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--chrome-tx2); margin: 6px 4px 10px; display: flex; align-items: center; justify-content: space-between;
+}
+.ed-item {
+    display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left;
+    background: var(--chrome-2); border: 1px solid #232E38; border-radius: 3px;
+    padding: 9px 10px; margin-bottom: 6px; cursor: grab; color: var(--chrome-tx); transition: all .15s;
+}
+.ed-item:hover { border-color: #3D4A57; }
+.ed-item.cur { border-color: var(--accent); background: #202932; }
+.ed-item.drag { opacity: .4; }
+.ed-item.over { border-top: 2px solid var(--accent); }
+.ed-item .n { font-family: var(--font-mono); font-size: 10px; color: var(--chrome-tx2); padding-top: 2px; min-width: 18px; }
+.ed-item .t { font-size: 12.5px; line-height: 1.32; font-weight: 500; }
+.ed-item .k { display: block; font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-top: 4px; }
+.ed-item > span:last-child { display: block; min-width: 0; }
+
+.ed-canvas { display: flex; flex-direction: column; min-width: 0; background: #0C1116; }
+.ed-toolbar {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 9px 14px; border-bottom: 1px solid #1E2831; background: var(--chrome);
+}
+.ed-stagewrap { flex: 1 1 auto; position: relative; overflow: hidden; }
+.ed-stage-scaler { position: absolute; left: 0; top: 0; }
+.ed-hint {
+    flex: 0 0 auto; padding: 8px 14px; border-top: 1px solid #1E2831;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--chrome-tx2);
+}
+.ed-hint b { color: var(--accent); font-weight: 400; }
+
+.field { margin-bottom: 13px; }
+.field label {
+    display: block; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--chrome-tx2); margin-bottom: 5px;
+}
+.field input, .field textarea, .field select {
+    width: 100%; background: var(--chrome-2); color: var(--chrome-tx);
+    border: 1px solid #2C3742; border-radius: 3px; padding: 8px 10px;
+    font-family: var(--font-body); font-size: 13px; line-height: 1.45;
+}
+.field textarea { resize: vertical; min-height: 92px; }
+.field input:focus, .field textarea:focus, .field select:focus { outline: none; border-color: var(--accent); }
+.swatches { display: flex; gap: 7px; }
+.sw { width: 30px; height: 30px; border-radius: 3px; border: 2px solid transparent; cursor: pointer; }
+.sw[aria-pressed="true"] { border-color: var(--chrome-tx); }
+.ed-divider { height: 1px; background: #232E38; margin: 18px 0 15px; }
+.ed-danger { color: #E0745C; border-color: #4A2A25; }
+.ed-danger:hover { background: #3A211C; border-color: #7A3A2C; color: #FFD9CE; }
+
+/* Editable affordances inside the edit preview */
+.edit-stage [contenteditable="true"] { outline: 1px dashed rgba(178, 58, 22, .38); outline-offset: 3px; border-radius: 2px; cursor: text; }
+.edit-stage [contenteditable="true"]:hover { background: rgba(178, 58, 22, .07); }
+.edit-stage [contenteditable="true"]:focus { outline: 2px solid var(--accent); background: rgba(178, 58, 22, .05); }
+
+/* ===========================================
+   6. SLIDE DESIGN SYSTEM
+   Engraved plate: hairline rules, dot-grid paper, mono captions.
+   =========================================== */
+.slide {
+    color: var(--ink); font-family: var(--font-body); font-size: var(--t-body);
+    background:
+        radial-gradient(circle at 18% 8%, rgba(255,255,255,.55), transparent 46%),
+        radial-gradient(circle at 88% 96%, rgba(168,121,31,.07), transparent 44%),
+        var(--paper);
+}
+.slide::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-image: radial-gradient(rgba(24,32,42,.10) 1px, transparent 1.4px);
+    background-size: 54px 54px; opacity: .5;
+}
+.slide > * { position: relative; z-index: 1; }
+
+/* Slide chrome: rules, plate number, running head */
+.s-frame { position: absolute; inset: 44px 52px; border: 1px solid var(--rule-soft); pointer-events: none; z-index: 0; }
+.s-crop { position: absolute; width: 16px; height: 16px; border: 0 solid var(--accent); opacity: .55; }
+.s-crop.tl { left: 40px; top: 40px; border-left-width: 1.5px; border-top-width: 1.5px; }
+.s-crop.br { right: 40px; bottom: 40px; border-right-width: 1.5px; border-bottom-width: 1.5px; }
+.s-run {
+    position: absolute; left: var(--pad); right: var(--pad); bottom: 44px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--font-mono); font-size: 14px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--ink-3);
+}
+.s-run .plate { color: var(--accent); }
+
+.s-body { position: absolute; inset: 0; padding: 78px var(--pad) 104px; display: flex; flex-direction: column; }
+
+/* Heading block */
+.shead { flex: 0 0 auto; margin-bottom: 34px; }
+.kicker {
+    font-family: var(--font-mono); font-size: var(--t-label); letter-spacing: .26em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 14px;
+    display: flex; align-items: center; gap: 14px;
+}
+.kicker::after { content: ''; flex: 1; height: 1px; background: var(--rule); }
+.stitle { font-family: var(--font-display); font-size: var(--t-h2); font-weight: 500; line-height: 1.06; letter-spacing: -.01em; }
+.stitle em { font-style: italic; color: var(--accent); }
+.ssub { font-size: 24px; color: var(--ink-2); margin-top: 12px; max-width: 1300px; line-height: 1.42; }
+/* Static slides centre in the plate; interactive slides anchor to the top so
+   their tabs and steppers never jump when a taller panel is opened. */
+.s-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; justify-content: center; }
+.s-main[data-ix] { justify-content: flex-start; }
+
+/* Cover slide */
+.cover { padding: 0; }
+.cover-inner { position: absolute; inset: 0; padding: 120px 130px; display: flex; flex-direction: column; justify-content: center; }
+.cover .eyebrow { font-family: var(--font-mono); font-size: 18px; letter-spacing: .34em; text-transform: uppercase; color: var(--accent); margin-bottom: 30px; }
+.cover h1 { font-family: var(--font-display); font-size: var(--t-title); font-weight: 500; line-height: 1.02; letter-spacing: -.015em; max-width: 1400px; }
+.cover h1 em { font-style: italic; }
+.cover .rule-double { margin: 40px 0 34px; width: 520px; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--ink); height: 5px; }
+.cover .byline { font-size: 28px; color: var(--ink-2); letter-spacing: .01em; }
+.cover .byline b { color: var(--ink); font-weight: 600; }
+.cover .meta { position: absolute; left: 130px; right: 130px; bottom: 90px; display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 15px; letter-spacing: .2em; text-transform: uppercase; color: var(--ink-3); }
+
+/* Section divider */
+.divider .s-body { justify-content: center; }
+.divider .big-n { font-family: var(--font-display); font-size: 210px; line-height: 1; color: var(--accent); opacity: .22; position: absolute; right: var(--pad); top: 140px; }
+.divider h2 { font-family: var(--font-display); font-size: 96px; font-weight: 500; line-height: 1.02; max-width: 1250px; }
+
+/* Grids */
+.g2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; }
+.g-32 { display: grid; grid-template-columns: 3fr 2fr; gap: 40px; }
+.g-23 { display: grid; grid-template-columns: 2fr 3fr; gap: 40px; }
+.stack { display: flex; flex-direction: column; gap: 18px; }
+
+/* Card */
+.card {
+    background: var(--paper-2); border: 1px solid var(--rule); border-radius: 2px;
+    padding: 26px 28px; position: relative;
+}
+.card.tint { background: rgba(178,58,22,.06); border-color: rgba(178,58,22,.28); }
+.card.tint2 { background: rgba(28,101,96,.07); border-color: rgba(28,101,96,.28); }
+.card.plain { background: transparent; }
+.card .cn {
+    font-family: var(--font-mono); font-size: 13px; letter-spacing: .18em;
+    color: var(--accent); margin-bottom: 10px; display: block;
+}
+.card h4 { font-family: var(--font-display); font-size: 30px; font-weight: 600; line-height: 1.14; margin-bottom: 10px; }
+.card p, .card li { font-size: var(--t-small); line-height: 1.5; color: var(--ink-2); }
+.card .big { font-family: var(--font-display); font-size: 62px; line-height: 1; color: var(--accent); }
+
+/* Lists */
+ul.bul { list-style: none; display: flex; flex-direction: column; gap: 11px; }
+ul.bul > li { position: relative; padding-left: 28px; font-size: var(--t-body); line-height: 1.42; }
+ul.bul > li::before { content: ''; position: absolute; left: 4px; top: .58em; width: 9px; height: 1.5px; background: var(--accent); }
+ul.bul.tight > li { font-size: var(--t-small); line-height: 1.45; }
+ul.bul ul { list-style: none; margin-top: 8px; display: flex; flex-direction: column; gap: 7px; }
+ul.bul ul li { position: relative; padding-left: 22px; font-size: var(--t-small); color: var(--ink-2); line-height: 1.4; }
+ul.bul ul li::before { content: ''; position: absolute; left: 2px; top: .62em; width: 5px; height: 5px; border: 1px solid var(--ink-3); }
+ol.num { list-style: none; counter-reset: n; display: flex; flex-direction: column; gap: 12px; }
+ol.num > li { counter-increment: n; position: relative; padding-left: 46px; font-size: var(--t-body); line-height: 1.4; }
+ol.num > li::before {
+    content: counter(n, decimal-leading-zero); position: absolute; left: 0; top: .18em;
+    font-family: var(--font-mono); font-size: 15px; color: var(--accent); letter-spacing: .06em;
+}
+
+/* Pull-quote / note */
+.note {
+    border-left: 3px solid var(--accent); padding: 6px 0 6px 24px;
+    font-family: var(--font-display); font-style: italic; font-size: 27px; line-height: 1.35; color: var(--ink);
+}
+.note.sm { font-size: 22px; }
+.src { font-family: var(--font-mono); font-size: 13px; letter-spacing: .08em; color: var(--ink-3); }
+
+/* Tags + stats */
+.tag {
+    display: inline-block; font-family: var(--font-mono); font-size: 13px; letter-spacing: .14em;
+    text-transform: uppercase; padding: 5px 11px; border: 1px solid var(--rule);
+    border-radius: 2px; color: var(--ink-2); background: rgba(255,255,255,.35);
+}
+.tag.hot { color: var(--accent); border-color: rgba(178,58,22,.4); background: rgba(178,58,22,.08); }
+.tag.cool { color: var(--accent-2); border-color: rgba(28,101,96,.4); background: rgba(28,101,96,.08); }
+.statline { display: flex; gap: 54px; }
+.stat .v { font-family: var(--font-display); font-size: 76px; line-height: 1; color: var(--accent); }
+.stat .l { font-family: var(--font-mono); font-size: 14px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); margin-top: 8px; }
+
+/* Table */
+table.plate { width: 100%; border-collapse: collapse; }
+table.plate th {
+    font-family: var(--font-mono); font-size: 14px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--ink-3); text-align: left; padding: 0 16px 12px 0; border-bottom: 1.5px solid var(--ink);
+}
+table.plate td { font-size: var(--t-small); line-height: 1.4; padding: 14px 16px 14px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: top; color: var(--ink-2); }
+table.plate.dense th { font-size: 13px; padding-bottom: 9px; }
+table.plate.dense td { font-size: 18.5px; line-height: 1.32; padding: 9px 14px 9px 0; }
+table.plate td.key { color: var(--ink); font-weight: 600; }
+
+/* ===========================================
+   7. INTERACTIVE COMPONENTS
+   Every component is data-attribute driven and event-delegated,
+   so it keeps working after slides are edited or re-ordered.
+   =========================================== */
+
+/* -- Tabs / toggles -- */
+.ix-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 22px; }
+.ix-tab {
+    font-family: var(--font-mono); font-size: 16px; letter-spacing: .14em; text-transform: uppercase;
+    padding: 12px 22px; border: 1px solid var(--rule); border-radius: 2px;
+    background: rgba(255,255,255,.4); color: var(--ink-2); cursor: pointer;
+    transition: all .22s var(--ease);
+}
+.ix-tab:hover { border-color: var(--accent); color: var(--accent); }
+.ix-tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ix-panel { display: none; animation: panelIn .4s var(--ease); }
+.ix-panel.on { display: block; }
+/* Panels fill the remaining plate, so switching tabs never makes the
+   slide visibly grow and shrink, and cards keep a common baseline. */
+.s-main[data-ix] > .ix-panels { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ix-panels > .ix-panel.on { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.ix-panels > .ix-panel.on > .g2,
+.ix-panels > .ix-panel.on > .g3,
+.ix-panels > .ix-panel.on > .g-32,
+.ix-panels > .ix-panel.on > .g-23 { flex: 1 1 auto; align-content: stretch; }
+.ix-panel > .g2, .ix-panel > .g3, .ix-panel > .g-32, .ix-panel > .g-23 { min-height: 300px; }
+.ix-panels > .ix-panel > .g2, .ix-panels > .ix-panel > .g3,
+.ix-panels > .ix-panel > .g-32, .ix-panels > .ix-panel > .g-23 { min-height: 0; }
+@keyframes panelIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* -- Stepper (timeline / operative sequence) -- */
+.ix-rail { display: flex; align-items: stretch; gap: 0; margin-bottom: 24px; border-top: 1.5px solid var(--ink); }
+.ix-stop {
+    flex: 1; position: relative; padding: 22px 14px 16px; text-align: left; cursor: pointer;
+    background: none; border: 0; border-right: 1px solid var(--rule-soft); transition: background .2s;
+}
+.ix-stop:last-child { border-right: 0; }
+.ix-stop::before {
+    content: ''; position: absolute; top: -1.5px; left: 0; right: 0; height: 3px;
+    background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform .35s var(--ease);
+}
+.ix-stop[aria-selected="true"]::before { transform: scaleX(1); }
+.ix-stop:hover { background: rgba(255,255,255,.34); }
+.ix-stop .sn { font-family: var(--font-mono); font-size: 14px; letter-spacing: .12em; color: var(--ink-3); display: block; margin-bottom: 7px; }
+.ix-stop[aria-selected="true"] .sn { color: var(--accent); }
+.ix-stop .st { font-size: 20px; line-height: 1.22; font-weight: 500; color: var(--ink-2); }
+.ix-stop[aria-selected="true"] .st { color: var(--ink); }
+.ix-navrow { display: flex; align-items: center; gap: 16px; margin-top: 20px; }
+.ix-btn {
+    font-family: var(--font-mono); font-size: 14px; letter-spacing: .14em; text-transform: uppercase;
+    padding: 10px 18px; border: 1px solid var(--ink); background: none; color: var(--ink);
+    border-radius: 2px; cursor: pointer; transition: all .2s;
+}
+.ix-btn:hover { background: var(--ink); color: var(--paper); }
+.ix-btn.solid { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ix-btn.solid:hover { filter: brightness(1.12); }
+
+/* -- Reveal cards (click to expose management) -- */
+.ix-reveal { cursor: pointer; transition: border-color .2s, transform .2s var(--ease); }
+.ix-reveal:hover { border-color: var(--accent); transform: translateY(-2px); }
+.ix-reveal .rv-hint { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+.ix-reveal .rv-hint::before { content: '+'; font-size: 15px; }
+.ix-reveal.open .rv-hint::before { content: '–'; }
+.ix-reveal .rv-body { max-height: 0; overflow: hidden; transition: max-height .45s var(--ease), margin .3s; }
+.ix-reveal.open .rv-body { max-height: 420px; margin-top: 14px; }
+.ix-reveal .rv-body p, .ix-reveal .rv-body li { color: var(--ink); }
+
+/* -- Hotspot diagram -- */
+.ix-hot { position: relative; }
+.hot-g { cursor: pointer; }
+.hot-g circle { fill: var(--paper); stroke: var(--accent); stroke-width: 2; transition: fill .22s var(--ease); }
+.hot-g text { fill: var(--accent); font-family: var(--font-mono); font-size: 15px; pointer-events: none; }
+.hot-g:hover circle { fill: rgba(178, 58, 22, .18); }
+.hot-g[aria-selected="true"] circle { fill: var(--accent); }
+.hot-g[aria-selected="true"] text { fill: #fff; }
+.hot-g .halo { fill: none; stroke: var(--accent); opacity: .35; animation: ping 2.8s infinite; }
+.hot-g[aria-selected="true"] .halo { animation: none; opacity: 0; }
+@keyframes ping { 0% { r: 17px; opacity: .5; } 70% { r: 27px; opacity: 0; } 100% { opacity: 0; } }
+.hot-detail { min-height: 172px; }
+.hot-detail h4 { font-family: var(--font-display); font-size: 30px; margin-bottom: 10px; }
+
+/* -- Filter matrix -- */
+.ix-chips { display: flex; gap: 9px; flex-wrap: wrap; margin-bottom: 22px; }
+.chip {
+    font-family: var(--font-mono); font-size: 14px; letter-spacing: .12em; text-transform: uppercase;
+    padding: 8px 15px; border: 1px solid var(--rule); border-radius: 2px;
+    background: rgba(255,255,255,.4); color: var(--ink-2); cursor: pointer; transition: all .2s;
+}
+.chip:hover { border-color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+tr.mx-row { transition: opacity .3s, background .2s; }
+tr.mx-row.dim { opacity: .17; }
+tr.mx-row.hit td.key { color: var(--accent); }
+.sev { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 9px; vertical-align: 1px; }
+.sev.major { background: var(--danger); }
+.sev.minor { background: var(--accent-3); }
+
+/* -- Quiz -- */
+.quiz-q { font-family: var(--font-display); font-size: 33px; line-height: 1.24; margin-bottom: 20px; }
+.quiz-opts { display: flex; flex-direction: column; gap: 12px; }
+.quiz-opt {
+    display: flex; gap: 16px; align-items: flex-start; text-align: left; width: 100%;
+    padding: 16px 20px; border: 1px solid var(--rule); border-radius: 2px;
+    background: rgba(255,255,255,.42); color: var(--ink-2); font-size: 22px; line-height: 1.38;
+    font-family: var(--font-body); cursor: pointer; transition: all .2s;
+}
+.quiz-opt:hover { border-color: var(--accent); }
+.quiz-opt .ltr { font-family: var(--font-mono); font-size: 15px; color: var(--ink-3); }
+.quiz-opt.right { border-color: var(--safe); background: rgba(28,101,96,.12); color: var(--ink); }
+.quiz-opt.right .ltr { color: var(--safe); }
+.quiz-opt.wrong { border-color: var(--danger); background: rgba(163,38,23,.1); }
+.quiz-fb { margin-top: 20px; font-size: 22px; line-height: 1.45; color: var(--ink); display: none; }
+.quiz-fb.on { display: block; animation: panelIn .35s var(--ease); }
+.quiz-fb b { color: var(--accent-2); }
+
+/* -- Checklist -- */
+.ck { display: flex; gap: 16px; align-items: flex-start; text-align: left; width: 100%;
+    padding: 15px 18px; border: 1px solid var(--rule); border-radius: 2px; background: rgba(255,255,255,.35);
+    cursor: pointer; transition: all .2s; font-family: var(--font-body); }
+.ck:hover { border-color: var(--accent); }
+.ck .box { flex: 0 0 auto; width: 22px; height: 22px; border: 1.5px solid var(--ink-3); border-radius: 2px; margin-top: 3px; display: grid; place-items: center; transition: all .2s; }
+.ck .box::after { content: ''; width: 11px; height: 6px; border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(-45deg) scale(0); transition: transform .22s var(--ease); }
+.ck.on { background: rgba(178,58,22,.07); border-color: rgba(178,58,22,.4); }
+.ck.on .box { background: var(--accent); border-color: var(--accent); }
+.ck.on .box::after { transform: rotate(-45deg) scale(1); }
+.ck .cktx { font-size: 21px; line-height: 1.4; color: var(--ink-2); }
+.ck .cktx b { color: var(--ink); }
+
+/* -- Dose calculator -- */
+.calc { display: grid; grid-template-columns: 260px 1fr; gap: 34px; align-items: center; }
+.calc-input { text-align: center; }
+.calc-input .wv { font-family: var(--font-display); font-size: 82px; line-height: 1; color: var(--accent); }
+.calc-input .wu { font-family: var(--font-mono); font-size: 15px; letter-spacing: .18em; text-transform: uppercase; color: var(--ink-3); }
+.calc-input input[type="range"] { width: 100%; margin-top: 18px; accent-color: var(--accent); height: 4px; }
+.calc-out { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.dose { border: 1px solid var(--rule); border-radius: 2px; padding: 20px 22px; background: rgba(255,255,255,.42); }
+.dose .dn { font-family: var(--font-mono); font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.dose .dv { font-family: var(--font-display); font-size: 46px; line-height: 1.05; color: var(--ink); margin: 8px 0 4px; }
+.dose .dv small { font-size: 20px; color: var(--ink-2); }
+.dose .dd { font-size: 17px; color: var(--ink-2); line-height: 1.35; }
+
+/* -- Jump menu (contents) -- */
+.jump { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 44px; }
+.jmp {
+    display: flex; align-items: baseline; gap: 18px; width: 100%; text-align: left;
+    background: none; border: 0; border-bottom: 1px solid var(--rule-soft);
+    padding: 13px 6px; cursor: pointer; font-family: var(--font-body); transition: all .2s;
+}
+.jmp:hover { background: rgba(178,58,22,.07); padding-left: 14px; }
+.jmp .jn { font-family: var(--font-mono); font-size: 14px; color: var(--accent); letter-spacing: .1em; }
+.jmp .jt { font-size: 23px; color: var(--ink); flex: 1; }
+.jmp .jp { font-family: var(--font-mono); font-size: 13px; color: var(--ink-3); }
+
+/* ===========================================
+   8. REVEAL ANIMATIONS
+   Elements animate when their slide gets .visible
+   =========================================== */
+.reveal { opacity: 0; transform: translateY(26px); transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.slide.visible .reveal { opacity: 1; transform: none; }
+.slide.visible .reveal:nth-child(1) { transition-delay: .06s; }
+.slide.visible .reveal:nth-child(2) { transition-delay: .14s; }
+.slide.visible .reveal:nth-child(3) { transition-delay: .22s; }
+.slide.visible .reveal:nth-child(4) { transition-delay: .30s; }
+.slide.visible .reveal:nth-child(5) { transition-delay: .38s; }
+.slide.visible .reveal:nth-child(6) { transition-delay: .46s; }
+.rule-draw { transform: scaleX(0); transform-origin: left; transition: transform .8s var(--ease) .1s; }
+.slide.visible .rule-draw { transform: scaleX(1); }
+
+/* ===========================================
+   9. APP CHROME ON SMALL SCREENS
+   Only the chrome adapts — the 1920x1080 slide stage never reflows.
+   =========================================== */
+@media (max-width: 860px) {
+    .brand-title { display: none; }
+    .appbar { gap: 10px; padding: 0 10px; }
+    .tab { padding: 7px 12px; }
+    .iconbtn { padding: 7px 9px; font-size: 9.5px; letter-spacing: .08em; }
+    .notes-panel { width: 100%; }
+    .view-edit.on {
+        grid-template-columns: 1fr;
+        grid-template-rows: 128px minmax(300px, 1fr) auto;
+    }
+    .ed-list { border-right: 0; border-bottom: 1px solid #26313C; }
+    .ed-inspector { border-left: 0; border-top: 1px solid #26313C; max-height: 42vh; }
+    .ed-toolbar { overflow-x: auto; flex-wrap: nowrap; }
+    .ed-hint { display: none; }
+}
+@media (max-width: 560px) {
+    .bar-actions .iconbtn { font-size: 0; padding: 7px; }
+    .bar-actions .iconbtn svg { width: 15px; height: 15px; }
+}
+</style>
+</head>
+<body>
+<!-- ===========================================
+     APP SHELL — two tabs: PRESENT and EDIT
+     =========================================== -->
+<div class="app" id="app" data-focus="off">
+
+  <!-- Top bar -->
+  <header class="appbar">
+    <div class="brand">
+      <span class="brand-mark">ESS</span>
+      <span class="brand-title" id="brandTitle">Endoscopic Sinus Surgery</span>
+    </div>
+
+    <nav class="tabs" role="tablist" aria-label="Deck mode">
+      <button class="tab" role="tab" data-mode-btn="present" aria-selected="true">Present</button>
+      <button class="tab" role="tab" data-mode-btn="edit" aria-selected="false">Edit</button>
+    </nav>
+
+    <div class="bar-actions" id="presentActions">
+      <button class="iconbtn" id="btnOverview" title="Slide overview (O)">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Grid</button>
+      <button class="iconbtn" id="btnNotes" title="Speaker notes (N)">
+        <svg viewBox="0 0 24 24"><path d="M4 4h16v13H8l-4 4z"/></svg>Notes</button>
+      <button class="iconbtn" id="btnFocus" title="Hide chrome / full screen (F)">
+        <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Focus</button>
+    </div>
+  </header>
+
+  <!-- ============ PRESENT VIEW ============ -->
+  <section class="view view-present on" id="viewPresent" role="tabpanel" aria-label="Presentation">
+    <div class="deck-viewport">
+      <main class="deck-stage" id="deckStage"></main>
+    </div>
+
+    <div class="deck-controls">
+      <button class="navbtn" id="btnPrev" aria-label="Previous slide"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <span class="counter"><b id="curNo">01</b> / <span id="totNo">01</span></span>
+      <button class="navbtn" id="btnNext" aria-label="Next slide"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+      <span class="keyhint">&larr; &rarr; move &middot; O grid &middot; N notes &middot; F focus &middot; E edit</span>
+    </div>
+    <div class="progress"><span id="progressBar"></span></div>
+
+    <aside class="notes-panel" id="notesPanel" aria-live="polite">
+      <h4>Speaker notes</h4>
+      <div class="nt-title" id="notesTitle"></div>
+      <div class="nt" id="notesBody"></div>
+    </aside>
+
+    <div class="overview" id="overview">
+      <div class="overview-head"><span>All slides</span><span>Click to jump &middot; Esc to close</span></div>
+      <div class="ov-grid" id="ovGrid"></div>
+    </div>
+  </section>
+
+  <!-- ============ EDIT VIEW ============ -->
+  <section class="view view-edit" id="viewEdit" role="tabpanel" aria-label="Editor">
+
+    <!-- Slide list -->
+    <aside class="ed-col ed-list">
+      <div class="ed-secttl"><span>Slides</span><span id="edCount">0</span></div>
+      <div id="edList"></div>
+      <button class="iconbtn" id="btnAdd" style="width:100%;justify-content:center;margin-top:8px">+ Add slide</button>
+    </aside>
+
+    <!-- Live editable slide -->
+    <div class="ed-canvas">
+      <div class="ed-toolbar">
+        <button class="iconbtn" id="btnUp" title="Move up">&uarr; Up</button>
+        <button class="iconbtn" id="btnDown" title="Move down">&darr; Down</button>
+        <button class="iconbtn" id="btnDup">Duplicate</button>
+        <button class="iconbtn" id="btnImg">Insert image</button>
+        <button class="iconbtn ed-danger" id="btnDel">Delete</button>
+        <span style="flex:1"></span>
+        <span class="save-flag" id="saveFlag">Saved</span>
+        <button class="iconbtn" id="btnExport" title="Download a standalone copy with your edits baked in">Export HTML</button>
+        <button class="iconbtn" id="btnJson" title="Download slide content as JSON">Export JSON</button>
+        <button class="iconbtn ed-danger" id="btnReset">Reset deck</button>
+        <input type="file" id="fileImg" accept="image/*" hidden>
+      </div>
+
+      <div class="ed-stagewrap" id="edStageWrap">
+        <div class="ed-stage-scaler" id="edScaler">
+          <div class="deck-stage edit-stage" id="editStage"></div>
+        </div>
+      </div>
+
+      <div class="ed-hint">
+        <b>Click any text</b> on the slide to rewrite it &middot; <b>Double-click</b> a button label to rename it &middot;
+        interactive controls stay live while you edit &middot; changes save to this browser automatically
+      </div>
+    </div>
+
+    <!-- Inspector -->
+    <aside class="ed-col ed-inspector">
+      <div class="ed-secttl"><span>Slide</span><span id="edIdx">1</span></div>
+      <div class="field"><label for="fKicker">Section label</label><input id="fKicker" type="text" placeholder="e.g. Technique"></div>
+      <div class="field"><label for="fTitle">Title (used in lists &amp; index)</label><input id="fTitle" type="text"></div>
+      <div class="field"><label for="fNotes">Speaker notes</label><textarea id="fNotes" placeholder="Notes appear in the Notes drawer during the talk (press N)."></textarea></div>
+
+      <div class="ed-divider"></div>
+      <div class="ed-secttl"><span>Deck</span></div>
+      <div class="field"><label for="fDeck">Deck title</label><input id="fDeck" type="text"></div>
+      <div class="field"><label for="fAuthor">Presenter</label><input id="fAuthor" type="text"></div>
+      <div class="field"><label for="fDate">Date</label><input id="fDate" type="text"></div>
+      <div class="field">
+        <label>Accent</label>
+        <div class="swatches" id="swatches">
+          <button class="sw" data-accent="vermilion" style="background:#B23A16" title="Vermilion" aria-pressed="true"></button>
+          <button class="sw" data-accent="teal" style="background:#1C6560" title="Endoscope teal" aria-pressed="false"></button>
+          <button class="sw" data-accent="ink" style="background:#2B3947" title="Ink" aria-pressed="false"></button>
+          <button class="sw" data-accent="ochre" style="background:#A8791F" title="Ochre" aria-pressed="false"></button>
+        </div>
+      </div>
+    </aside>
+  </section>
+</div>
+<!-- Slot for content baked in by "Export HTML" from the Edit tab -->
+<script id="userDeck" type="application/json"></script>
+<script>
+/* ===========================================
+   DECK CONTENT
+   Everything the deck says lives in this one structure, so the
+   Edit tab can rewrite, re-order, add and remove slides without
+   touching the engine below.
+     kicker  — running section label (top-left of the slide)
+     title   — used by the index, the overview grid and the editor list
+     layout  — cover | divider | standard
+     notes   — speaker notes (Notes drawer, press N)
+     html    — the slide body, authored at 1920x1080
+   =========================================== */
+const DECK_DEFAULT = {
+  meta: {
+    title: 'Endoscopic Sinus Surgery & Its Complications',
+    author: 'Nichana S.',
+    date: '16 September 2024',
+    venue: 'Otolaryngology — Head & Neck Surgery',
+    accent: 'vermilion'
+  },
+  slides: [
+
+/* ---------- 01 COVER ---------- */
+{ id: 'cover', layout: 'cover', kicker: '', title: 'Endoscopic Sinus Surgery & Its Complications',
+  notes: 'Two halves: how the operation is done, and how it goes wrong. The second half only makes sense once the first is anatomically clear.',
+  html: `<div class="s-crop tl"></div><div class="s-crop br"></div>
+  <div class="cover-inner">
+    <div class="eyebrow reveal">Rhinology &middot; Operative teaching plate</div>
+    <h1 class="reveal">Endoscopic Sinus Surgery<br>and <em>the complications</em> that follow it</h1>
+    <div class="rule-double reveal"></div>
+    <div class="byline reveal">Presented by <b data-deck="author">Nichana S.</b></div>
+  </div>
+  <div class="meta">
+    <span data-deck="venue">Otolaryngology &mdash; Head &amp; Neck Surgery</span>
+    <span data-deck="date">16 September 2024</span>
+  </div>` },
+
+/* ---------- 02 CONTENTS ---------- */
+{ id: 'contents', layout: 'standard', kicker: 'Index', title: 'What this plate covers',
+  notes: 'Click any line to jump straight to that section.',
+  html: `<div class="s-main">
+    <div class="jump reveal" data-ix="jump">
+      <button class="jmp" data-jump="history"><span class="jn">I</span><span class="jt">Where the operation came from</span><span class="jp">History &amp; lexicon</span></button>
+      <button class="jmp" data-jump="indications"><span class="jn">V</span><span class="jt">Who should be operated on</span><span class="jp">Indications</span></button>
+      <button class="jmp" data-jump="lexicon"><span class="jn">II</span><span class="jt">How much surgery is meant</span><span class="jp">Extent of surgery</span></button>
+      <button class="jmp" data-jump="workup"><span class="jn">VI</span><span class="jt">Reading the scan before the knife</span><span class="jp">Preoperative work-up</span></button>
+      <button class="jmp" data-jump="fess"><span class="jn">III</span><span class="jt">What makes surgery functional</span><span class="jp">Principles of FESS</span></button>
+      <button class="jmp" data-jump="theatre"><span class="jn">VII</span><span class="jt">Position, anaesthesia, a dry field</span><span class="jp">In theatre</span></button>
+      <button class="jmp" data-jump="balloon"><span class="jn">IV</span><span class="jt">Dilating instead of dissecting</span><span class="jp">Balloon sinusotomy</span></button>
+      <button class="jmp" data-jump="steps"><span class="jn">VIII</span><span class="jt">The six steps, in order</span><span class="jp">Operative sequence</span></button>
+      <button class="jmp" data-jump="aftercare"><span class="jn">IX</span><span class="jt">Why the cavity heals or scars</span><span class="jp">Postoperative care</span></button>
+      <button class="jmp" data-jump="cxmap"><span class="jn">X</span><span class="jt">Every way this operation fails</span><span class="jp">Complications</span></button>
+      <button class="jmp" data-jump="orbalgo"><span class="jn">XI</span><span class="jt">The eye, in the next fifteen minutes</span><span class="jp">Orbital emergency</span></button>
+      <button class="jmp" data-jump="quiz"><span class="jn">XII</span><span class="jt">Six questions on the way out</span><span class="jp">Self-check</span></button>
+    </div>
+  </div>` },
+
+/* ---------- 03 HISTORY ---------- */
+{ id: 'history', layout: 'standard', kicker: 'I &middot; Origins', title: 'Three centuries to reach the middle meatus',
+  notes: 'Messerklinger 1978 is the hinge: the endoscope turned sinus surgery from an external, radical operation into a transnasal, physiology-restoring one.',
+  html: `<div class="s-main" data-ix="steps">
+    <div class="ix-rail reveal">
+      <button class="ix-stop" data-step="0" aria-selected="true"><span class="sn">1675</span><span class="st">Molinetti</span></button>
+      <button class="ix-stop" data-step="1"><span class="sn">1890s</span><span class="st">Caldwell &middot; Spicer &middot; Luc</span></button>
+      <button class="ix-stop" data-step="2"><span class="sn">Early 1900s</span><span class="st">Caldwell&ndash;Luc era</span></button>
+      <button class="ix-stop" data-step="3"><span class="sn">1978</span><span class="st">Messerklinger</span></button>
+      <button class="ix-stop" data-step="4"><span class="sn">1980s</span><span class="st">Stammberger</span></button>
+      <button class="ix-stop" data-step="5"><span class="sn">1985</span><span class="st">Kennedy</span></button>
+    </div>
+    <div class="reveal ix-panels">
+      <div class="ix-panel on" data-panel="0"><div class="g-32">
+        <div><h3 class="stitle" style="font-size:44px">Through the anterior wall</h3>
+        <p style="margin-top:16px;color:var(--ink-2)">Molinetti describes a surgical approach to the maxillary sinus through its anterior wall &mdash; the sinus is reached by breaking into it, and drainage is whatever the opening happens to provide.</p></div>
+        <div class="card tint"><span class="cn">Idea of the era</span><p>Disease is inside a box. Open the box.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="1"><div class="g-32">
+        <div><h3 class="stitle" style="font-size:44px">An opening into the inferior meatus</h3>
+        <p style="margin-top:16px;color:var(--ink-2)">Caldwell, Spicer and Luc add a counter-opening into the inferior meatus, working with gravity rather than the natural ostium.</p></div>
+        <div class="card tint"><span class="cn">Idea of the era</span><p>Dependent drainage beats natural drainage.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="2"><div class="g-32">
+        <div><h3 class="stitle" style="font-size:44px">The Caldwell&ndash;Luc approach</h3>
+        <p style="margin-top:16px;color:var(--ink-2)">A sublabial antrostomy with radical removal of sinus mucosa becomes the standard operation of the early twentieth century.</p></div>
+        <div class="card tint"><span class="cn">Cost</span><p>Facial numbness, oro-antral fistula, and a sinus stripped of the mucociliary apparatus it needed.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="3"><div class="g-32">
+        <div><h3 class="stitle" style="font-size:44px">Messerklinger pioneers ESS</h3>
+        <p style="margin-top:16px;color:var(--ink-2)">Endoscopic study of mucociliary transport shows that maxillary and frontal disease is usually secondary to a narrow, inflamed ethmoid &mdash; the ostiomeatal complex. Treat the transition space and the dependent sinus recovers.</p></div>
+        <div class="card tint2"><span class="cn">The inversion</span><p>Stop stripping the sinus. Ventilate its natural pathway and let physiology do the rest.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="4"><div class="g-32">
+        <div><h3 class="stitle" style="font-size:44px">Stammberger carries it outward</h3>
+        <p style="margin-top:16px;color:var(--ink-2)">The same technique, taught and popularised well beyond Germany and Austria.</p></div>
+        <div class="card tint2"><span class="cn">Effect</span><p>A local Austrian practice becomes a transferable operation with a teachable anatomy.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="5"><div class="g-32">
+        <div><h3 class="stitle" style="font-size:44px">Kennedy introduces ESS to the US</h3>
+        <p style="margin-top:16px;color:var(--ink-2)">The term <em>functional</em> endoscopic sinus surgery enters the literature, and with it the standard of restoring ventilation and mucociliary clearance rather than removing mucosa.</p></div>
+        <div class="card tint2"><span class="cn">Legacy</span><p>Every step that follows in this deck is a descendant of that reframing.</p></div>
+      </div></div>
+    </div>
+    <p class="src reveal" style="margin-top:26px">Cummings Ed. 7 &mdash; Primary Sinus Surgery</p>
+  </div>` },
+
+/* ---------- 04 LEXICON ---------- */
+{ id: 'lexicon', layout: 'standard', kicker: 'II &middot; Lexicon', title: 'Say what you mean by <em>sinus surgery</em>',
+  notes: 'EPOS 2020 terminology. When two surgeons compare outcomes without agreeing on extent, they are comparing different operations.',
+  html: `<div class="s-main" data-ix="tabs">
+    <div class="ix-tabs reveal">
+      <button class="ix-tab" data-tab="0" aria-selected="true">Polypectomy</button>
+      <button class="ix-tab" data-tab="1">MIST</button>
+      <button class="ix-tab" data-tab="2">Full FESS</button>
+      <button class="ix-tab" data-tab="3">Extended</button>
+      <button class="ix-tab" data-tab="4">Radical</button>
+    </div>
+    <div class="reveal ix-panels">
+      <div class="ix-panel on" data-panel="0"><div class="g2">
+        <div class="card"><span class="cn">Definition</span><h4>Polyps out, anatomy untouched</h4><p>Removal of polyps from the nose or from a post-surgical cavity <b>without altering the bony anatomy</b>.</p></div>
+        <div class="card plain"><span class="cn">Reads as</span><p style="font-size:24px">A debulking manoeuvre, not a drainage operation. Nothing has been done to the transition spaces, so recurrence is governed entirely by the underlying inflammatory disease.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="1"><div class="g2">
+        <div class="card"><span class="cn">Definition</span><h4>Minimally invasive sinus technique</h4><p>The <b>least tissue removal</b> compatible with clinical improvement, conserving mucosa. Surgical clearing of disease in a transition space allows the dependent sinus to recover function.</p></div>
+        <div class="card tint2"><span class="cn">Transition spaces</span><ul class="bul tight"><li>Ethmoid infundibulum</li><li>Hiatus semilunaris</li><li>Superior / posteromedial wall of the agger nasi cell</li><li>Superior meatus</li><li>Spheno-ethmoidal recess</li></ul></div>
+      </div></div>
+      <div class="ix-panel" data-panel="2"><div class="g2">
+        <div class="card"><span class="cn">Definition</span><h4>Complete sinus opening</h4><p>Anterior <b>and</b> posterior ethmoidectomy, middle meatal antrostomy (usually large), sphenoidotomy and a frontal opening &mdash; e.g. Draf IIa.</p></div>
+        <div class="card plain"><span class="cn">Reads as</span><p style="font-size:24px">Every sinus is addressed and every cavity is accessible to topical therapy. This is the reference operation the rest of this deck describes.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="3"><div class="g2">
+        <div class="card"><span class="cn">Definition</span><h4>Beyond the confines of the sinuses</h4><p>Dissection carried into the <b>skull base, orbit, pterygopalatine and infratemporal fossa</b>.</p></div>
+        <div class="card tint"><span class="cn">When</span><p>May be necessary for complicated acute rhinosinusitis, or for eosinophilic CRS and CRSwNP.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="4"><div class="g2">
+        <div class="card"><span class="cn">Definition</span><h4>Full, plus mucosal removal</h4><p>The same extent as <b>full</b>, but may include significant removal of inflamed or dysfunctional mucosa.</p></div>
+        <div class="card tint"><span class="cn">Caution</span><p>This is the one term that reaches back toward the pre-Messerklinger operation. Reserve it, and mean it, when you use it.</p></div>
+      </div></div>
+    </div>
+    <p class="src reveal" style="margin-top:26px">EPOS 2020</p>
+  </div>` },
+
+/* ---------- 05 FESS PRINCIPLES ---------- */
+{ id: 'fess', layout: 'standard', kicker: 'III &middot; Principles', title: 'What makes an operation <em>functional</em>',
+  notes: 'The four criteria are the checklist to run at the end of the case: ostium included, ventilated, cleared, irrigable.',
+  html: `<div class="s-main">
+    <div class="g-23 reveal">
+      <div>
+        <div class="note">Restitution of physiology &mdash; not removal of anatomy.</div>
+        <ol class="num" style="margin-top:26px">
+          <li>Creates a sinus cavity that <b>incorporates the natural ostium</b></li>
+          <li>Allows adequate sinus <b>ventilation</b></li>
+          <li>Facilitates <b>mucociliary clearance</b></li>
+          <li>Facilitates <b>instillation of topical therapies</b></li>
+        </ol>
+        <p class="src" style="margin-top:22px">EPOS 2020</p>
+      </div>
+      <div class="g2" style="grid-template-columns:1fr 1fr;align-content:start">
+        <div class="card tint2"><span class="cn">Objectives</span>
+          <ul class="bul tight"><li>Re-establish the physiologic pattern of ventilation and mucociliary clearance</li><li>Decrease inflammatory burden</li><li>Prepare the nasal cavity for topical medications</li></ul></div>
+        <div class="card"><span class="cn">Methods</span>
+          <ul class="bul tight"><li>Remove irreversibly diseased mucosa and osteitic bony partitions</li><li>Preserve normal tissue</li><li>Widen the <b>true natural ostia</b></li><li>One step beyond the disease</li></ul></div>
+      </div>
+    </div>
+    <p class="src reveal" style="margin-top:26px">Cummings Ed. 7 &mdash; Primary Sinus Surgery</p>
+  </div>` },
+
+/* ---------- 06 BALLOON ---------- */
+{ id: 'balloon', layout: 'standard', kicker: 'IV &middot; Alternative', title: 'Balloon sinusotomy &mdash; dilatation instead of dissection',
+  notes: 'Bolger 2006. The point to make: a lower-morbidity technique is not a zero-morbidity technique.',
+  html: `<div class="s-main">
+    <div class="g-32 reveal">
+      <div class="stack">
+        <p style="font-size:27px;line-height:1.42">Dilatation of the <b>natural sinus ostium</b> by a balloon inflation device, passed over a guidewire positioned under endoscopic visualisation, image guidance, or a light-assisted guidewire. Inflation dilates the targeted ostium.</p>
+        <div class="statline">
+          <div class="stat"><div class="v">4</div><div class="l">Sinuses amenable</div></div>
+          <div class="stat" style="flex:1"><p style="font-size:22px;line-height:1.4;color:var(--ink-2);padding-top:8px">Frontal &middot; sphenoid &middot; maxillary &middot; anterior ethmoid. May be combined with conventional ESS &mdash; the so-called <b>hybrid procedure</b>.</p></div>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="card tint2"><span class="cn">Evidence</span><p>A systematic review and meta-analysis reports long-term improvement in quality-of-life and sinus opacification scores in CRS.</p></div>
+        <div class="card tint"><span class="cn">Do not oversell it</span><p>Adverse effects are much like conventional ESS: <b>orbital injury, CSF leak, and death.</b></p></div>
+      </div>
+    </div>
+    <p class="src reveal" style="margin-top:26px">Bolger WE, 2006 &middot; Cummings Ed. 7 &mdash; Primary Sinus Surgery</p>
+  </div>` },
+
+/* ---------- 07 INDICATIONS ---------- */
+{ id: 'indications', layout: 'standard', kicker: 'V &middot; Selection', title: 'Absolute and relative indications',
+  notes: 'Absolute indications: the operation is the treatment. Relative indications: the operation is what you offer after medical therapy has been given a fair trial.',
+  html: `<div class="s-main">
+    <div class="g2 reveal">
+      <div class="card tint">
+        <span class="cn">Absolute &mdash; operate</span>
+        <ol class="num" style="margin-top:8px">
+          <li>Complications of rhinosinusitis</li>
+          <li>Expansile mucoceles</li>
+          <li>Allergic or invasive fungal rhinosinusitis</li>
+          <li>Suspected neoplasia</li>
+        </ol>
+      </div>
+      <div class="card">
+        <span class="cn">Relative &mdash; inflammatory disease</span>
+        <ol class="num" style="margin-top:8px">
+          <li>Symptomatic nasal polyps unresponsive to medical therapy</li>
+          <li>Symptomatic chronic or recurrent acute rhinosinusitis despite appropriate medical therapy</li>
+        </ol>
+        <div class="note sm" style="margin-top:20px">Relative means the alternative is legitimate. It is a conversation, not a booking.</div>
+      </div>
+    </div>
+    <p class="src reveal" style="margin-top:26px">Cummings Ed. 5 &mdash; Causes of Failure &middot; Cummings Ed. 7 &mdash; Primary Sinus Surgery</p>
+  </div>` },
+
+/* ---------- 08 CRS CRITERIA ---------- */
+{ id: 'crs', layout: 'standard', kicker: 'V &middot; Selection', title: 'When is ESS appropriate in uncomplicated CRS?',
+  notes: 'Three conditions in both columns: a CT that shows something, a real medical trial, and a symptom score that still justifies surgery.',
+  html: `<div class="s-main" data-ix="tabs">
+    <div class="ix-tabs reveal">
+      <button class="ix-tab" data-tab="0" aria-selected="true">CRS with nasal polyps</button>
+      <button class="ix-tab" data-tab="1">CRS without nasal polyps</button>
+    </div>
+    <div class="reveal ix-panels">
+      <div class="ix-panel on" data-panel="0"><div class="g3">
+        <div class="card"><span class="cn">01 &mdash; Imaging</span><h4>Lund&ndash;Mackay &ge; 1</h4><p>CT must show disease. A normal scan is a reason to re-examine the diagnosis, not to operate.</p></div>
+        <div class="card"><span class="cn">02 &mdash; Medical trial</span><h4>&ge; 8 weeks of topical intranasal corticosteroid</h4><p><b>plus</b> a short course of systemic corticosteroid.</p></div>
+        <div class="card"><span class="cn">03 &mdash; Symptom burden</span><h4>Post-treatment SNOT-22 &ge; 20</h4><p>The patient is still symptomatic after the trial has been completed properly.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="1"><div class="g3">
+        <div class="card"><span class="cn">01 &mdash; Imaging</span><h4>Lund&ndash;Mackay &ge; 1</h4><p>Same threshold, same logic.</p></div>
+        <div class="card"><span class="cn">02 &mdash; Medical trial</span><h4>&ge; 8 weeks of topical intranasal corticosteroid</h4><p><b>plus either</b> a short course of broad-spectrum or culture-directed antibiotic, <b>or</b> a prolonged course of low-dose anti-inflammatory antibiotic.</p></div>
+        <div class="card"><span class="cn">03 &mdash; Symptom burden</span><h4>Post-treatment SNOT-22 &ge; 20</h4><p>Score after, not before, the medical trial.</p></div>
+      </div></div>
+    </div>
+    <p class="src reveal" style="margin-top:26px">EPOS 2020 &middot; ICAR 2021</p>
+  </div>` },
+
+/* ---------- 09 PATHWAY ---------- */
+{ id: 'pathway', layout: 'standard', kicker: 'VI &middot; The arc', title: 'One operation, three phases',
+  notes: 'Use this as the map. Everything that follows sits in one of these three boxes.',
+  html: `<div class="s-main">
+    <div class="g3 reveal">
+      <div class="card"><span class="cn">Phase 01 &mdash; Preoperative</span><h4>Decide and prepare</h4>
+        <ul class="bul tight" style="margin-top:12px"><li>History, examination, endoscopy</li><li>Imaging: non-contrast CT &plusmn; MRI</li><li>Preoperative medication</li><li>Image guidance if indicated</li></ul></div>
+      <div class="card tint"><span class="cn">Phase 02 &mdash; Intraoperative</span><h4>Position, decongest, dissect</h4>
+        <ul class="bul tight" style="margin-top:12px"><li>Patient and surgeon position</li><li>Decongestant and local anaesthetic</li><li>Technique, in sequence</li><li>Packing material</li></ul></div>
+      <div class="card tint2"><span class="cn">Phase 03 &mdash; Postoperative</span><h4>Protect the cavity you made</h4>
+        <ul class="bul tight" style="margin-top:12px"><li>Activity restriction, follow-up</li><li>Saline irrigation</li><li>Intranasal corticosteroid</li><li>Debridement of the healing cavity</li></ul></div>
+    </div>
+    <div class="note reveal" style="margin-top:34px">A technically perfect dissection can still fail in phase three. The cavity is not finished on the day of surgery.</div>
+  </div>` },
+
+/* ---------- 10 PREOP ASSESSMENT ---------- */
+{ id: 'workup', layout: 'standard', kicker: 'VI &middot; Work-up', title: 'Preoperative assessment',
+  notes: 'The history is where you find the predictors of a poor result; the CT is where you find the predictors of a complication.',
+  html: `<div class="s-main">
+    <div class="g2 reveal">
+      <div class="stack">
+        <div class="card tint"><span class="cn">History &mdash; factors predicting poorer outcome</span>
+          <p>Ongoing smoking &middot; CRSwNP with asthma &middot; AERD &middot; allergy &middot; immunodeficiency &middot; depression</p></div>
+        <div class="card"><span class="cn">Examination</span>
+          <p>Septal deviation &middot; internal nasal valve &middot; mucosal state &middot; sinus drainage &middot; polyps</p></div>
+      </div>
+      <div class="stack">
+        <div class="card"><span class="cn">Radiology</span>
+          <ul class="bul tight"><li><b>Non-contrast CT</b>, 0.5&ndash;1 mm slices &mdash; anatomy and disease, and the dataset for navigation</li>
+          <li>In CRS with positive endoscopy: treat medically first, then scan <b>3&ndash;4 weeks after therapy</b> to see what the treatment actually changed</li></ul></div>
+        <div class="card tint2"><span class="cn">MRI &mdash; adjunctive, sometimes essential</span>
+          <ul class="bul tight"><li>When CT shows disease adjacent to the skull base or lamina papyracea erosion</li><li>To separate inflammatory disease from tumour</li></ul></div>
+      </div>
+    </div>
+    <p class="src reveal" style="margin-top:26px">Cummings Ed. 7 &mdash; Primary Sinus Surgery</p>
+  </div>` },
+
+/* ---------- 11 CT RED FLAGS ---------- */
+{ id: 'ctflags', layout: 'standard', kicker: 'VI &middot; Work-up', title: 'Six variants to find <em>before</em> you scrub',
+  notes: 'Run this list out loud on every preoperative CT. Each one is a documented route into the orbit or the anterior cranial fossa. Click each item to tick it off.',
+  html: `<div class="s-main">
+    <p class="ssub reveal" style="margin-bottom:22px">Specific variations that predispose to inadvertent penetration of the orbit or the anterior cranial cavity.</p>
+    <div class="g2 reveal" data-ix="check" style="gap:14px 26px">
+      <button class="ck" data-ck><span class="box"></span><span class="cktx"><b>Lamina papyracea medial to the maxillary ostium</b> &mdash; the orbit sits where you expect the antrostomy</span></button>
+      <button class="ck" data-ck><span class="box"></span><span class="cktx"><b>Maxillary sinus hypoplasia</b> &mdash; atelectatic uncinate hugging the orbital wall</span></button>
+      <button class="ck" data-ck><span class="box"></span><span class="cktx"><b>Fovea ethmoidalis abnormality</b> &mdash; a low or sloping fovea, asymmetric sides</span></button>
+      <button class="ck" data-ck><span class="box"></span><span class="cktx"><b>Lamina papyracea dehiscence</b> &mdash; periorbita already exposed before the first bite</span></button>
+      <button class="ck" data-ck><span class="box"></span><span class="cktx"><b>Sphenoid wall variants</b> &mdash; septum inserting on the carotid, dehiscent carotid or optic nerve</span></button>
+      <button class="ck" data-ck><span class="box"></span><span class="cktx"><b>Supraorbital ethmoid cells / frontal hyperpneumatisation</b> &mdash; may accompany a deep fovea ethmoidalis</span></button>
+    </div>
+    <div class="note reveal" style="margin-top:30px">Read both sides. Asymmetry between the two skull bases is the finding that catches people out.</div>
+  </div>` },
+
+/* ---------- 12 IGS ---------- */
+{ id: 'igs', layout: 'standard', kicker: 'VI &middot; Work-up', title: 'When image guidance earns its place',
+  notes: 'Navigation confirms what you already believe. It does not replace knowing the anatomy, and it does not stop the instrument.',
+  html: `<div class="s-main">
+    <div class="g-23 reveal">
+      <div class="stack">
+        <p style="font-size:26px;line-height:1.45">Use of image guidance in ESS has increased steadily and, in the USA, is supported by AAO-HNS guidance for ESS.</p>
+        <div class="note sm">Appropriate does not mean mandatory &mdash; and never mandatory in place of anatomical knowledge.</div>
+      </div>
+      <ul class="bul reveal">
+        <li>Revision sinus surgery</li>
+        <li>Distorted anatomy &mdash; developmental, postoperative or traumatic</li>
+        <li>Extensive sinonasal polyposis</li>
+        <li>Pathology of the frontal, posterior ethmoid and sphenoid sinuses</li>
+        <li>Disease abutting the skull base, orbit, optic nerve or carotid artery</li>
+        <li>CSF rhinorrhoea or a known skull base defect</li>
+        <li>Benign and malignant sinonasal neoplasms</li>
+      </ul>
+    </div>
+    <p class="src reveal" style="margin-top:26px">EPOS 2020</p>
+  </div>` },
+
+/* ---------- 13 PREOP MEDS ---------- */
+{ id: 'preopmeds', layout: 'standard', kicker: 'VI &middot; Work-up', title: 'Preoperative medical therapy',
+  notes: 'The EPOS statement is the one to remember: steroids yes, antibiotics no.',
+  html: `<div class="s-main">
+    <div class="g-32 reveal">
+      <ul class="bul">
+        <li>Antibiotics and oral steroids may be started <b>7&ndash;10 days before surgery</b> to reduce severe inflammation in purulent CRS</li>
+        <li>Preoperative oral corticosteroid in reactive lower airway disease may enhance surgical safety and prevent respiratory complications</li>
+        <li>Perioperative oral corticosteroid may improve the operative field and postoperative healing in CRSwNP</li>
+        <li>Stop anticoagulants, aspirin and NSAIDs, and the four G herbs &mdash; <b>ginseng, garlic, ginger, ginkgo biloba</b> &mdash; for 10 days</li>
+      </ul>
+      <div class="card tint" style="align-self:center">
+        <span class="cn">EPOS 2020 steering group</span>
+        <div class="note" style="border:0;padding:0;font-size:26px">Use nasal corticosteroids before endoscopic sinus surgery. No other medication has been shown to improve the surgical field and outcome. <b style="font-style:normal;color:var(--accent)">Antibiotics are not helpful.</b></div>
+      </div>
+    </div>
+    <p class="src reveal" style="margin-top:26px">EPOS 2020 &middot; Cummings Ed. 7</p>
+  </div>` },
+
+/* ---------- 14 POSITIONING ---------- */
+{ id: 'theatre', layout: 'standard', kicker: 'VII &middot; In theatre', title: 'Position: patient, surgeon, scrub nurse',
+  notes: 'One straight line: patient head, surgeon, monitor. Everything else in this slide follows from that line.',
+  html: `<div class="s-main" data-ix="tabs">
+    <div class="ix-tabs reveal">
+      <button class="ix-tab" data-tab="0" aria-selected="true">Patient</button>
+      <button class="ix-tab" data-tab="1">Surgeon</button>
+      <button class="ix-tab" data-tab="2">Scrub nurse</button>
+      <button class="ix-tab" data-tab="3">Endoscope &amp; instruments</button>
+    </div>
+    <div class="reveal ix-panels">
+      <div class="ix-panel on" data-panel="0"><div class="g2">
+        <ul class="bul"><li>Table tilted <b>30&deg; anti-Trendelenburg</b>, head elevated 10&ndash;20&deg;</li><li>Head in a <b>neutral</b> position, turned toward the surgeon</li><li>Patient head and monitor in a straight line</li></ul>
+        <div class="card tint"><span class="cn">Why neutral matters</span><p>It lets you work in a plane <b>parallel to the skull base</b>, which reduces the angle of approach and with it the risk of skull base injury.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="1"><div class="g2">
+        <ul class="bul"><li>Sit at the patient's right-hand side</li><li>Rest the elbow &mdash; do not operate with an unsupported arm</li></ul>
+        <div class="card tint"><span class="cn">Why the elbow matters</span><p>An unsupported elbow makes the monitor image move excessively: instability of the hand holding the endoscope reads on screen as a moving skull base.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="2"><div class="g2">
+        <ul class="bul"><li>Instrument table <b>parallel</b> to the head of the operating table</li><li>This keeps the monitor stack in a straight line with the patient's head and the surgeon</li></ul>
+        <div class="card tint2"><span class="cn">Result</span><p>Instruments are handed into the line of work; nobody breaks the sightline to the monitor.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="3"><div class="g2">
+        <ul class="bul"><li>Push the endoscope <b>as far superiorly as possible</b></li><li>This creates a space in the nasal vestibule <b>below</b> the endoscope through which all instruments pass</li></ul>
+        <div class="card tint"><span class="cn">The rule</span><p>The endoscope and the instruments should <b>never cross</b> during surgery.</p></div>
+      </div></div>
+    </div>
+    <p class="src reveal" style="margin-top:26px">Wormald &mdash; Endoscopic Sinus Surgery</p>
+  </div>` },
+
+/* ---------- 15 ANAESTHESIA ---------- */
+{ id: 'anaesthesia', layout: 'standard', kicker: 'VII &middot; In theatre', title: 'Local or general?',
+  notes: 'LA is for limited middle-meatal work. For everything else the argument is about field quality, and that is where TIVA comes in.',
+  html: `<div class="s-main">
+    <div class="g2 reveal">
+      <div class="card">
+        <span class="cn">Local anaesthesia &mdash; limitations</span>
+        <ol class="num" style="margin-top:6px">
+          <li>Patient anxiety and sudden movement</li>
+          <li>Long operations of 1&ndash;2 hours; patients struggle to stay still</li>
+          <li>Difficulty achieving adequate anaesthesia</li>
+          <li>Water, secretions and blood trickling into the pharynx &mdash; aspiration risk</li>
+          <li>Poor setting for teaching residents</li>
+        </ol>
+        <div class="note sm" style="margin-top:18px">Offer LA for limited ESS confined to the middle meatus.</div>
+      </div>
+      <div class="card tint2">
+        <span class="cn">General anaesthesia &mdash; targets</span>
+        <div class="statline" style="margin:10px 0 18px">
+          <div class="stat"><div class="v">55&ndash;70</div><div class="l">MAP, mmHg</div></div>
+          <div class="stat"><div class="v">&lt; 60</div><div class="l">Heart rate, bpm</div></div>
+        </div>
+        <p><b>TIVA</b> has been proposed as the preferred anaesthetic for ESS: it is thought to decrease cardiac output without the significant fall in systemic vascular resistance seen with inhalational agents &mdash; a lower-pressure, less congested field.</p>
+      </div>
+    </div>
+    <p class="src reveal" style="margin-top:26px">Wormald &middot; Cummings Ed. 7</p>
+  </div>` },
+
+/* ---------- 16 VASOCONSTRICTOR PHARM ---------- */
+{ id: 'vaso', layout: 'standard', kicker: 'VII &middot; A dry field', title: 'Two classes of decongestant, two mechanisms',
+  notes: 'The clinically useful distinction: imidazolines act directly post-synaptically and at the venous sinusoids, without the labile hypertension of indirect sympathomimetics.',
+  html: `<div class="s-main">
+    <div class="g2 reveal">
+      <div class="card">
+        <span class="cn">Sympathomimetic amines &mdash; indirect</span>
+        <p style="margin-bottom:14px">Amphetamine &middot; benzedrine &middot; caffeine &middot; ephedrine &middot; mescaline &middot; phenylephrine &middot; pseudoephedrine</p>
+        <ul class="bul tight">
+          <li>Act via the sympathetic nervous system: presynaptic release of noradrenaline</li>
+          <li>NA binds postsynaptic <b>&alpha;-receptors</b> &rarr; vasoconstriction</li>
+          <li>Mild <b>&beta;-agonism</b> &mdash; vasodilatation once the &alpha; effect wears off</li>
+        </ul>
+      </div>
+      <div class="card tint2">
+        <span class="cn">Imidazolines &mdash; direct</span>
+        <p style="margin-bottom:14px">Clonidine &middot; naphazoline &middot; <b>oxymetazoline</b> &middot; xylometazoline</p>
+        <ul class="bul tight">
+          <li>Act <b>postsynaptically</b> &rarr; vasoconstriction</li>
+          <li>Act at the <b>venous sinusoids</b>: no labile hypertension</li>
+          <li>Lower endogenous noradrenaline production by negative feedback</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note reveal" style="margin-top:30px">In a systematic review of topical vasoconstrictors in ESS, <b style="font-style:normal">no cases of morbidity were identified with topical oxymetazoline.</b></div>
+    <p class="src reveal" style="margin-top:18px">Higgins TS et al. Systematic Review of Topical Vasoconstrictors in Endoscopic Sinus Surgery. Laryngoscope 2011</p>
+  </div>` },
+
+/* ---------- 17 DOSE CALCULATOR ---------- */
+{ id: 'doses', layout: 'standard', kicker: 'VII &middot; A dry field', title: 'Agents, dilutions and the ceiling dose',
+  notes: 'Move the slider before the case. The cocaine ceiling is the one that kills; 3 mg/kg is not a large volume of 10% solution.',
+  html: `<div class="s-main">
+    <div class="calc reveal" data-ix="calc" style="margin-bottom:30px">
+      <div class="calc-input card plain">
+        <div class="wv" data-calc-w>60</div><div class="wu">kg body weight</div>
+        <input type="range" min="30" max="120" step="1" value="60" data-calc-range aria-label="Patient weight in kilograms">
+      </div>
+      <div class="calc-out">
+        <div class="dose"><div class="dn">Topical 4% lidocaine &middot; 4.5 mg/kg</div><div class="dv" data-calc-lido>270 mg</div><div class="dd"><span data-calc-lidoml>6.8</span> mL of 4% solution &mdash; capped at 300 mg</div></div>
+        <div class="dose"><div class="dn">Injected 1% lidocaine + adrenaline</div><div class="dv" data-calc-lidoepi>420 mg</div><div class="dd">7 mg/kg with adrenaline, capped at 500 mg &mdash; <span data-calc-lidoepiml>42</span> mL of 1%</div></div>
+        <div class="dose"><div class="dn">Cocaine &mdash; toxic dose 3 mg/kg</div><div class="dv" data-calc-coke>180 mg</div><div class="dd">Ceiling, not a target. <span data-calc-cokeml>1.8</span> mL of 10% solution reaches it</div></div>
+      </div>
+    </div>
+    <div class="g3 reveal">
+      <div class="card"><span class="cn">Topical</span><p>0.05% oxymetazoline &plusmn; 4% lidocaine. Adrenaline 1:1,000 to 1:10,000, usual dose 0.5&ndash;1 mg.</p></div>
+      <div class="card"><span class="cn">Cocaine mixtures</span><p>2 mL of 10% cocaine (200 mg) + 1 mL adrenaline 1:1,000 + 4 mL saline, in two equal portions. <b>Moffett's:</b> 2&ndash;4 mL of 5% cocaine + 1 mL adrenaline 1:1,000 + 4 mL of 8.4% bicarbonate.</p></div>
+      <div class="card tint2"><span class="cn">One unit's practice</span><p><b>Packing</b> 4% xylocaine 5 mL + adrenaline 1:1,000 1 mL, or 1% ephedrine. <b>Injection</b> 0.5% xylocaine with adrenaline 1:200,000.</p></div>
+    </div>
+    <p class="src reveal" style="margin-top:22px">Teaching aid only &mdash; local protocol and the anaesthetist govern the dose given.</p>
+  </div>` },
+
+/* ---------- 18 INJECTION ---------- */
+{ id: 'injection', layout: 'standard', kicker: 'VII &middot; A dry field', title: 'Where the needle goes',
+  notes: 'Blanching is the endpoint at the axilla. Fifteen minutes to work, peak at thirty — inject before you drape, not after.',
+  html: `<div class="s-main">
+    <div class="g2 reveal">
+      <div class="stack">
+        <div class="card"><span class="cn">Axilla of the middle turbinate</span><p>For anterior sinus surgery: <b>1&ndash;1.5 mL lidocaine 1% with adrenaline 1:100,000</b>, injected until blanching.</p></div>
+        <div class="card"><span class="cn">Greater palatine block</span><p>Decreases bleeding from posterior sinonasal structures during posterior ethmoidectomy and sphenoid sinusotomy.</p>
+        <ul class="bul tight" style="margin-top:12px"><li><b>Trans-nasal:</b> 1&ndash;1.5 mL near the horizontal attachment of the middle turbinate to the lateral nasal wall</li><li><b>Trans-oral:</b> infiltrate the pterygopalatine fossa through the greater palatine foramen</li></ul></div>
+      </div>
+      <div class="stack">
+        <div class="card tint"><span class="cn">Cottonoid placement, in order</span>
+          <ol class="num"><li>Spheno-ethmoidal recess</li><li>Under the middle turbinate</li><li>Over the axilla of the middle turbinate</li></ol>
+          <p style="margin-top:12px">Use the least abrasive packing material &mdash; neurosurgical cottonoid patties &mdash; and a Freer elevator to place them gently.</p></div>
+        <div class="card tint2"><span class="cn">Timing &amp; the honest caveat</span>
+          <p>Onset around <b>15 minutes</b>, peak effect at <b>30 minutes</b>. If topical vasoconstrictors are already in use, an additional vasoconstrictor injection may add no further haemostatic benefit in routine ESS &mdash; though a long-acting local anaesthetic may still be worth injecting for postoperative pain.</p></div>
+      </div>
+    </div>
+    <p class="src reveal" style="margin-top:22px">Pant H. Hemostasis in Endoscopic Sinus Surgery. Otolaryngol Clin N Am 2016;49:655&ndash;676 &middot; Cummings Ed. 7</p>
+  </div>` },
+
+/* ---------- 19 TWO SCHOOLS ---------- */
+{ id: 'schools', layout: 'standard', kicker: 'VIII &middot; Technique', title: 'Two directions through the same ethmoid',
+  notes: 'Messerklinger front-to-back is the default. Wigand back-to-front finds the skull base first and is useful in extensive polyposis where landmarks are lost anteriorly.',
+  html: `<div class="s-main">
+    <div class="g2 reveal">
+      <div class="card tint"><span class="cn">Messerklinger &mdash; anterior to posterior</span>
+        <ol class="num" style="margin-top:8px"><li>Uncinectomy</li><li>Middle meatal sinusotomy</li><li>Ethmoidectomy, anterior to posterior</li><li>Sphenoid sinusotomy</li><li>Explore the frontal recess</li></ol></div>
+      <div class="card tint2"><span class="cn">Wigand &mdash; posterior to anterior</span>
+        <ol class="num" style="margin-top:8px"><li>Partial resection of the middle turbinate</li><li>Sphenoidotomy</li><li>Ethmoidectomy</li><li>Middle meatal antrostomy</li><li>Explore the frontal recess</li></ol></div>
+    </div>
+    <div class="note reveal" style="margin-top:32px">Both are governed by the same discipline: work from <b style="font-style:normal">known to unknown</b>, and identify the skull base before you dissect along it.</div>
+  </div>` }
+  ]
+};
+
+/* ---------- The operative sequence, complications, close ---------- */
+DECK_DEFAULT.slides.push(
+
+/* ---------- 20 SIX STEPS (master interactive) ---------- */
+{ id: 'steps', layout: 'standard', kicker: 'VIII &middot; Technique', title: 'The six steps, in order',
+  notes: 'This is the spine of the talk. Walk the six stops left to right; each panel gives the aim, the manoeuvre and the thing that goes wrong.',
+  html: `<div class="s-main" data-ix="steps">
+    <div class="ix-rail reveal">
+      <button class="ix-stop" data-step="0" aria-selected="true"><span class="sn">Step 01</span><span class="st">Medialise the middle turbinate</span></button>
+      <button class="ix-stop" data-step="1"><span class="sn">Step 02</span><span class="st">Uncinectomy</span></button>
+      <button class="ix-stop" data-step="2"><span class="sn">Step 03</span><span class="st">Middle meatal antrostomy</span></button>
+      <button class="ix-stop" data-step="3"><span class="sn">Step 04</span><span class="st">Ethmoidectomy</span></button>
+      <button class="ix-stop" data-step="4"><span class="sn">Step 05</span><span class="st">Sphenoidotomy</span></button>
+      <button class="ix-stop" data-step="5"><span class="sn">Step 06</span><span class="st">Frontal sinusotomy</span></button>
+    </div>
+    <div class="reveal ix-panels">
+      <div class="ix-panel on" data-panel="0"><div class="g3">
+        <div class="card"><span class="cn">Aim</span><h4>See the middle meatus</h4><p>Gentle medialisation opens the corridor for every step that follows.</p></div>
+        <div class="card"><span class="cn">Manoeuvre</span><p>Medialise the turbinate; out-fracture the inferior turbinate to widen the view of the middle meatus.</p></div>
+        <div class="card tint"><span class="cn">Pitfall</span><p>Aggressive manipulation destabilises the turbinate and can <b>fracture it at the skull base</b>.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="1"><div class="g3">
+        <div class="card"><span class="cn">Aim</span><h4>Open the infundibulum</h4><p>Find the natural maxillary ostium and the region of the frontal recess; make room for ethmoid and frontal work.</p></div>
+        <div class="card"><span class="cn">Manoeuvre</span><p>Sickle knife or elevator; or backbiting forceps followed by microdebrider, rongeur or 45&deg; through-cutting forceps.</p></div>
+        <div class="card tint"><span class="cn">Pitfall</span><p>Injury to the <b>lamina papyracea</b>, and to the <b>nasolacrimal duct</b> &mdash; only 1&ndash;8 mm anterior to the root of the uncinate.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="2"><div class="g3">
+        <div class="card"><span class="cn">Aim</span><h4>One ostium, not two</h4><p>Join any accessory ostium to the natural ostium so the sinus stops recirculating.</p></div>
+        <div class="card"><span class="cn">Manoeuvre</span><p>Ball probe to locate the ostium &mdash; direct it <b>downward, away from the orbit</b>. Enlarge with a downbiter or side-biting punch through the posterior fontanelle.</p></div>
+        <div class="card tint"><span class="cn">Pitfall</span><p>Extending within <b>0.5 cm of the posterior wall</b> risks a branch of the sphenopalatine artery.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="3"><div class="g3">
+        <div class="card"><span class="cn">Aim</span><h4>Known to unknown</h4><p>Resect the bulla until the retrobullar space, basal lamella and lamina papyracea are clearly defined; then follow the skull base.</p></div>
+        <div class="card"><span class="cn">Manoeuvre</span><p>Enter the bulla <b>inferomedially, away from the orbit</b>. Dissect posterior ethmoids to the sphenoid face, then work <b>posterior to anterior</b> along the skull base with a 30&deg; scope.</p></div>
+        <div class="card tint"><span class="cn">Pitfall</span><p>Over-resecting the horizontal basal lamella destabilises the middle turbinate &rarr; lateralisation and obstruction of the middle meatus and frontal recess.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="4"><div class="g3">
+        <div class="card"><span class="cn">Aim</span><h4>Enter low and medial</h4><p>Find the natural ostium in the spheno-ethmoidal recess, medial and posterior to the superior turbinate.</p></div>
+        <div class="card"><span class="cn">Manoeuvre</span><p>J-curette into the os, fracture the anterior face laterally, enlarge with a Kerrison or mushroom punch. Resect the lower third to half of the superior turbinate to extend laterally.</p></div>
+        <div class="card tint"><span class="cn">Pitfall</span><p>Never force the probe: <b>skull base, optic nerve, internal carotid</b>. Over-resecting the superior turbinate injures olfactory fibres.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="5"><div class="g3">
+        <div class="card"><span class="cn">Aim</span><h4>Leave a mucosa-lined outflow</h4><p>Open the agger nasi and create a smooth transition from posterior frontal table to anterior ethmoid skull base.</p></div>
+        <div class="card"><span class="cn">Manoeuvre</span><p>Open the axilla, remove the posterior wall and <b>cap</b> of the agger nasi cell, cannulate the frontal recess behind it. 30&deg; then 45&deg; and 70&deg; endoscopes.</p></div>
+        <div class="card tint"><span class="cn">Pitfall</span><p>Stripping mucosa around the frontal recess &rarr; postoperative stenosis and neo-osteogenesis. Done <b>last</b>, because bleeding from below hampers the dissection.</p></div>
+      </div></div>
+    </div>
+    <p class="src reveal" style="margin-top:24px">Cummings Ed. 6 &amp; 7 &middot; Atlas of Endoscopic Sinus and Skull Base Surgery 2013</p>
+  </div>` },
+
+/* ---------- 21 UNCINECTOMY ---------- */
+{ id: 'uncinectomy', layout: 'standard', kicker: 'VIII &middot; Step 02', title: 'Uncinectomy: retrograde or anterograde',
+  notes: 'The teaching point: retrograde incises through the hiatus semilunaris in an axial plane, so the instrument is never travelling toward the orbit.',
+  html: `<div class="s-main" data-ix="tabs">
+    <div class="ix-tabs reveal">
+      <button class="ix-tab" data-tab="0" aria-selected="true">Retrograde &mdash; backbiter</button>
+      <button class="ix-tab" data-tab="1">Anterograde &mdash; sickle knife</button>
+      <button class="ix-tab" data-tab="2">Landmarks</button>
+    </div>
+    <div class="reveal ix-panels">
+      <div class="ix-panel on" data-panel="0"><div class="g-32">
+        <div><p style="font-size:25px;line-height:1.45">Incise the uncinate <b>via the hiatus semilunaris in an axial plane</b>, between the posteroinferior third and superior two-thirds, then work forward. Take the first bite as low as possible near the base of the uncinate. Zero-degree endoscope.</p>
+        <p style="font-size:25px;line-height:1.45;margin-top:16px">A Kerrison bone punch completes the removal; the upper part of the uncinate is taken last.</p></div>
+        <div class="card tint2"><span class="cn">Why it is preferred</span><ul class="bul tight"><li>Reduces the risk of orbital penetration</li><li>Makes the natural maxillary ostium easy to find</li><li>Lower risk to the lamina papyracea and nasolacrimal duct</li></ul></div>
+      </div></div>
+      <div class="ix-panel" data-panel="1"><div class="g-32">
+        <div><p style="font-size:25px;line-height:1.45">A sickle knife or Freer elevator incises the uncinate near its top edge and runs down in a <b>sagittal plane</b>. The uncinate is medialised to reveal the infundibulum and, often, the natural ostium. Remaining superior and inferior attachments are cut with scissors or through-cutting forceps &mdash; done well, the segment comes out without tearing mucosa.</p></div>
+        <div class="card tint"><span class="cn">Why it is riskier</span><ul class="bul tight"><li>Harder to find the natural maxillary ostium &mdash; the anteroinferior uncinate cannot be removed adequately</li><li>Higher risk to the lamina papyracea, especially with an atelectatic uncinate</li><li>Higher risk to the nasolacrimal duct</li></ul></div>
+      </div></div>
+      <div class="ix-panel" data-panel="2"><div class="g3">
+        <div class="card"><span class="cn">Anterior</span><h4>Maxillary line</h4><p>The attachment of the uncinate to the lacrimal bone. The nasolacrimal duct lies <b>1&ndash;8 mm anterior</b> to the root of the uncinate.</p></div>
+        <div class="card"><span class="cn">Posterior</span><h4>Free edge</h4><p>The uncinate is best identified at its posterior edge; medialise toward the middle meatus from there.</p></div>
+        <div class="card tint"><span class="cn">Lateral</span><h4>Lamina papyracea</h4><p>Beware an uncinate lateralised against the medial orbital wall &mdash; take great caution with a sickle knife or microdebrider to prevent inadvertent orbital entry.</p></div>
+      </div></div>
+    </div>
+    <p class="src reveal" style="margin-top:24px">Sammen D. et al. Manual of Endoscopic Sinus Surgery &middot; Cummings Ed. 7</p>
+  </div>` },
+
+/* ---------- 22 ANTROSTOMY ---------- */
+{ id: 'antrostomy', layout: 'standard', kicker: 'VIII &middot; Step 03', title: 'Maxillary antrostomy: how wide, and how far',
+  notes: 'Types I to III describe extent. The pear shape checked on the 30-degree scope is the quality control.',
+  html: `<div class="s-main" data-ix="tabs">
+    <div class="ix-tabs reveal">
+      <button class="ix-tab" data-tab="0" aria-selected="true">Type I</button>
+      <button class="ix-tab" data-tab="1">Type II</button>
+      <button class="ix-tab" data-tab="2">Type III</button>
+      <button class="ix-tab" data-tab="3">Boundaries</button>
+      <button class="ix-tab" data-tab="4">Extended</button>
+    </div>
+    <div class="reveal ix-panels">
+      <div class="ix-panel on" data-panel="0"><div class="g-32">
+        <div class="card"><span class="cn">Type I sinusotomy</span><h4>Opened posteriorly to a limited extent, under 1 cm</h4><p>Through-cutting instruments. Where an accessory ostium exists, it is joined to the natural ostium.</p></div>
+        <div class="card tint2"><span class="cn">Principle</span><p>Every antrostomy must include the natural ostium. An opening beside it produces recirculation, not drainage.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="1"><div class="g-32">
+        <div class="card"><span class="cn">Type II sinusotomy</span><h4>Extended further posteriorly and inferiorly, under 2 cm</h4><p>The working antrostomy for most inflammatory disease requiring access.</p></div>
+        <div class="card tint"><span class="cn">Watch</span><p>Beyond <b>0.5 cm of the posterior wall</b>, expect a branch of the sphenopalatine artery.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="2"><div class="g-32">
+        <div class="card"><span class="cn">Type III sinusotomy</span><h4>Wide exposure &mdash; opened in all directions</h4><p>Maximal access for irrigation and topical therapy, and for disease that must be reached in the sinus itself.</p></div>
+        <div class="card tint2"><span class="cn">Check</span><p>The <b>pear shape</b> of the antrostomy is verified with a 30&deg; endoscope; inspect the sinus with a 70&deg;.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="3"><div class="g2">
+        <table class="plate">
+          <tr><th>Margin</th><th>Limit</th></tr>
+          <tr><td class="key">Anterior</td><td>Lacrimal crest</td></tr>
+          <tr><td class="key">Inferior</td><td>Base of the inferior turbinate</td></tr>
+          <tr><td class="key">Superior</td><td>The orbit</td></tr>
+          <tr><td class="key">Posterior</td><td>Posterior wall of the maxilla</td></tr>
+        </table>
+        <div class="card tint"><span class="cn">Landmarks inside</span><ul class="bul tight"><li>Medial and inferior orbital wall</li><li>Infraorbital cell</li><li>Infraorbital nerve</li></ul>
+        <p style="margin-top:12px">The natural os sits at the junction of the lower third and upper two-thirds of the maxillary line.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="4"><div class="g3">
+        <div class="card"><span class="cn">Mega-antrostomy</span><p>Extended to the back wall and inferiorly to the nasal floor, requiring a posterior partial inferior turbinectomy.</p></div>
+        <div class="card"><span class="cn">Medial maxillectomy</span><p>Removal of the whole inferior turbinate, uncinate, ethmoid bulla and the medial maxillary wall containing the distal nasolacrimal duct.</p></div>
+        <div class="card tint2"><span class="cn">Modified medial maxillectomy</span><p>As for mega-antrostomy, preserving the head of the inferior turbinate and the nasolacrimal duct, with additional inferomedial maxillary bone resected.</p></div>
+      </div></div>
+    </div>
+    <p class="src reveal" style="margin-top:24px">Sammen D. et al. &middot; Wormald &middot; Ashman A, Psaltis AJ, Wormald PJ, Tan NC-W. J Laryngol Otol 2020;134(6):473&ndash;480</p>
+  </div>` },
+
+/* ---------- 23 ETHMOIDECTOMY ---------- */
+{ id: 'ethmoid', layout: 'standard', kicker: 'VIII &middot; Step 04', title: 'Ethmoidectomy: partial or complete',
+  notes: 'The last posterior ethmoid cell lies superolateral to the sphenoid; when it extends posterolaterally over the sphenoid it is an Onodi cell — optic nerve.',
+  html: `<div class="s-main">
+    <div class="g2 reveal" style="margin-bottom:26px">
+      <div class="card"><span class="cn">Partial &mdash; mini-FESS</span><p>Removal of the ethmoid bulla and any cells against the medial orbital wall <b>anterior to the basal lamella</b>, often with a maxillary antrostomy.</p>
+      <p style="margin-top:10px"><b>Indication:</b> recurrent acute rhinosinusitis, or non-polypoid CRS.</p></div>
+      <div class="card tint"><span class="cn">Complete</span><p>Removal of the <b>anterior and posterior</b> ethmoid air cells.</p>
+      <p style="margin-top:10px"><b>Indication:</b> CRS with polyps, revision surgery, disease in the posterior ethmoids and sphenoid.</p></div>
+    </div>
+    <div class="g3 reveal">
+      <div class="card plain"><span class="cn">Sequence</span><ul class="bul tight"><li>Identify the medial wall of the bulla; enter inferomedially</li><li>Expose the lamina papyracea laterally and the oblique basal lamella posteriorly</li><li>Dissect the basal lamella <b>inferiorly to the horizontal portion</b> and superiorly to the height of the maxillary sinus roof</li></ul></div>
+      <div class="card plain"><span class="cn">Then</span><ul class="bul tight"><li>Dissect posterior ethmoids to the anterior sphenoid face</li><li>Identify the skull base and work <b>posterior to anterior</b> along it</li><li>Stop at the roof of the bulla and the suprabullar recess &mdash; the region of the <b>anterior ethmoidal artery</b></li></ul></div>
+      <div class="card tint2"><span class="cn">Anatomy to keep</span><ul class="bul tight"><li>Leave the upper limit of the bulla: it localises the frontal recess</li><li>Cells lateral to the superior turbinate are posterior ethmoid cells</li><li>The last posterior cell lies <b>superolateral</b> to the sphenoid; extending posterolaterally it becomes an <b>Onodi cell</b></li></ul></div>
+    </div>
+    <p class="src reveal" style="margin-top:24px">Atlas of Endoscopic Sinus and Skull Base Surgery 2013 &middot; Cummings Ed. 7</p>
+  </div>` },
+
+/* ---------- 24 SPHENOID ---------- */
+{ id: 'sphenoid', layout: 'standard', kicker: 'VIII &middot; Step 05', title: 'Finding the sphenoid ostium safely',
+  notes: 'Four independent ways of locating the same ostium. If two of them disagree, stop and re-orient rather than pushing.',
+  html: `<div class="s-main">
+    <div class="g-32" data-ix="hot">
+      <div class="ix-hot reveal" style="position:relative;height:440px;background:rgba(255,255,255,.4);border:1px solid var(--rule);border-radius:2px">
+        <svg viewBox="0 0 640 440" style="position:absolute;inset:0;width:100%;height:100%" role="img" aria-label="Schematic of the anterior sphenoid face and the four landmarks for the ostium">
+          <text x="365" y="34" font-family="Azeret Mono, monospace" font-size="13" fill="#6E7883" letter-spacing="3" text-anchor="middle">ANTERIOR SPHENOID FACE</text>
+          <rect x="210" y="60" width="310" height="290" fill="rgba(255,255,255,.55)" stroke="#18202A" stroke-width="1.6" opacity=".75"/>
+          <line x1="210" y1="120" x2="560" y2="120" stroke="#A8791F" stroke-width="1.3" stroke-dasharray="8 6"/>
+          <text x="566" y="116" font-family="Azeret Mono, monospace" font-size="11" fill="#A8791F">ROOF OF MAXILLARY SINUS</text>
+          <text x="566" y="131" font-family="Azeret Mono, monospace" font-size="11" fill="#A8791F">never look higher</text>
+          <line x1="210" y1="157" x2="560" y2="157" stroke="#B23A16" stroke-width="1.3" stroke-dasharray="8 6"/>
+          <text x="566" y="161" font-family="Azeret Mono, monospace" font-size="11" fill="#6E7883">upper 1/3 &#183; lower 2/3</text>
+          <line x1="150" y1="350" x2="560" y2="350" stroke="#18202A" stroke-width="2.2"/>
+          <text x="566" y="354" font-family="Azeret Mono, monospace" font-size="11" fill="#6E7883">CHOANA</text>
+          <path d="M120 80 C150 160 150 280 120 340" fill="none" stroke="#18202A" stroke-width="1.8" opacity=".6"/>
+          <text x="52" y="200" font-family="Azeret Mono, monospace" font-size="11" fill="#6E7883">SUPERIOR</text>
+          <text x="52" y="216" font-family="Azeret Mono, monospace" font-size="11" fill="#6E7883">TURBINATE</text>
+          <line x1="128" y1="253" x2="152" y2="253" stroke="#B23A16" stroke-width="1.3"/>
+          <text x="46" y="272" font-family="Azeret Mono, monospace" font-size="10" fill="#B23A16">lower 1/3</text>
+          <ellipse cx="268" cy="205" rx="30" ry="19" fill="rgba(178,58,22,.18)" stroke="#B23A16" stroke-width="1.8"/>
+          <text x="268" y="210" font-family="Azeret Mono, monospace" font-size="12" fill="#B23A16" text-anchor="middle">OS</text>
+          <path d="M330 344 L330 232" fill="none" stroke="#1C6560" stroke-width="1.4" marker-end="url(#ar)"/>
+          <path d="M325 240 L330 228 L335 240" fill="none" stroke="#1C6560" stroke-width="1.4"/>
+          <text x="342" y="300" font-family="Azeret Mono, monospace" font-size="11" fill="#1C6560">1&#8211;1.5 cm</text>
+          <g class="hot-g" data-hot="0" aria-selected="true"><circle class="halo" cx="228" cy="157" r="17"/><circle cx="228" cy="157" r="15"/><text x="228" y="162" text-anchor="middle">1</text></g>
+          <g class="hot-g" data-hot="1"><circle class="halo" cx="140" cy="253" r="17"/><circle cx="140" cy="253" r="15"/><text x="140" y="258" text-anchor="middle">2</text></g>
+          <g class="hot-g" data-hot="2"><circle class="halo" cx="470" cy="120" r="17"/><circle cx="470" cy="120" r="15"/><text x="470" y="125" text-anchor="middle">3</text></g>
+          <g class="hot-g" data-hot="3"><circle class="halo" cx="330" cy="350" r="17"/><circle cx="330" cy="350" r="15"/><text x="330" y="355" text-anchor="middle">4</text></g>
+        </svg>
+      </div>
+      <div class="stack reveal">
+        <div class="card hot-detail">
+          <div class="ix-panel on" data-panel="0"><span class="cn">Landmark 01</span><h4>Half-way up the anterior wall</h4><p>The ostium sits roughly midway between the superior and inferior borders of the anterior sphenoid wall in the spheno-ethmoidal recess &mdash; at the junction of the upper third and lower two-thirds.</p></div>
+          <div class="ix-panel" data-panel="1"><span class="cn">Landmark 02</span><h4>Lower half of the superior turbinate</h4><p>Resect the inferior third to half of the superior turbinate to expose it. Over-resection injures olfactory fibres.</p></div>
+          <div class="ix-panel" data-panel="2"><span class="cn">Landmark 03</span><h4>Level of the maxillary sinus roof</h4><p>Never look for the ostium higher than this line.</p></div>
+          <div class="ix-panel" data-panel="3"><span class="cn">Landmark 04</span><h4>1&ndash;1.5 cm above the choana</h4><p>The most reliable landmark when polyps have obliterated everything above.</p></div>
+        </div>
+        <div class="card tint"><span class="cn">Non-negotiable</span><p>The probe is <b>never forced</b> &mdash; skull base, optic nerve, internal carotid artery. Enter <b>inferomedially</b>; do not use the microdebrider on the lateral wall; leave septations that may attach to a dehiscent carotid.</p></div>
+      </div>
+    </div>
+    <p class="src reveal" style="margin-top:20px">Atlas of Endoscopic Sinus and Skull Base Surgery 2013 &middot; Cummings Ed. 7 &mdash; schematic, not to scale</p>
+  </div>` },
+
+/* ---------- 25 SPHENOID BOUNDARIES ---------- */
+{ id: 'sphenoidbounds', layout: 'standard', kicker: 'VIII &middot; Step 05', title: 'What surrounds the sphenoid sinus',
+  notes: 'Every wall of this box has something behind it that you cannot afford to enter.',
+  html: `<div class="s-main">
+    <div class="g2 reveal" style="gap:44px">
+      <table class="plate">
+        <tr><th>Wall</th><th>What lies beyond</th></tr>
+        <tr><td class="key">Anterior</td><td>Superior turbinate and posterior ethmoid cells</td></tr>
+        <tr><td class="key">Medial</td><td>Intersinus septum and nasal septum</td></tr>
+        <tr><td class="key">Posterior</td><td>Pituitary sella superiorly, clival recess inferiorly</td></tr>
+        <tr><td class="key">Lateral</td><td>Cavernous sinus, optic nerve, infratemporal fossa</td></tr>
+        <tr><td class="key">Superior</td><td>Planum sphenoidale, anterior skull base</td></tr>
+      </table>
+      <div class="stack">
+        <div class="card tint2"><span class="cn">Two approaches</span>
+          <p><b>Transnasal</b> &mdash; spares the ethmoid cavity, dissection medial to the middle turbinate. For isolated sphenoid pathology (fungal ball, isolated sphenoiditis) and for access to the sella with a posterior septectomy.</p>
+          <p style="margin-top:12px"><b>Transethmoid</b> &mdash; inferior ethmoid cells removed to reach the anterior sphenoid face; part of complete FESS. Enter through the inferomedial part of the most posterior ethmoid cell, or identify the ostium in the spheno-ethmoidal recess (preferred).</p></div>
+        <div class="card tint"><span class="cn">Bleeding at the ostium</span><p>Small arterial branches lie inferiorly and medially (<b>posterior septal branch</b> of the sphenopalatine) and laterally (<b>posterior lateral nasal branch</b>). Simple cautery controls them.</p></div>
+      </div>
+    </div>
+    <p class="src reveal" style="margin-top:22px">Atlas of Endoscopic Sinus and Skull Base Surgery 2013 &middot; Cummings Ed. 7</p>
+  </div>` },
+
+/* ---------- 26 FRONTAL ---------- */
+{ id: 'frontal', layout: 'standard', kicker: 'VIII &middot; Step 06', title: 'Frontal sinusotomy &mdash; Draf IIa',
+  notes: 'Agger nasi is the key to the frontal sinus. Removing the cap widens the recess more than anything else you do.',
+  html: `<div class="s-main" data-ix="steps">
+    <div class="ix-rail reveal">
+      <button class="ix-stop" data-step="0" aria-selected="true"><span class="sn">01</span><span class="st">Plan on the CT</span></button>
+      <button class="ix-stop" data-step="1"><span class="sn">02</span><span class="st">Open the axilla</span></button>
+      <button class="ix-stop" data-step="2"><span class="sn">03</span><span class="st">Cannulate the recess</span></button>
+      <button class="ix-stop" data-step="3"><span class="sn">04</span><span class="st">Remove the cap</span></button>
+      <button class="ix-stop" data-step="4"><span class="sn">05</span><span class="st">Smooth the transition</span></button>
+      <button class="ix-stop" data-step="5"><span class="sn">Draf</span><span class="st">Classification</span></button>
+    </div>
+    <div class="reveal ix-panels">
+      <div class="ix-panel on" data-panel="0"><div class="g2"><p style="font-size:26px;line-height:1.45">Determine the <b>superior attachment of the uncinate process</b> on the preoperative CT &mdash; it tells you where the frontal sinus drains.</p><div class="card tint"><span class="cn">Order of play</span><p>The frontal recess and agger nasi are opened <b>last</b> in a complete or anterior ethmoidectomy, because blood from below hampers dissection of the lower cells.</p></div></div></div>
+      <div class="ix-panel" data-panel="1"><div class="g2"><p style="font-size:26px;line-height:1.45">Open the <b>axilla of the middle turbinate</b> to identify the agger nasi cell. Dissect higher in the recess; removing the most superior uncinate gives access to the frontal recess.</p><div class="card tint2"><span class="cn">Scopes</span><p>30&deg; first, then 45&deg; and 70&deg; to identify the skull base in the posterior frontal table.</p></div></div></div>
+      <div class="ix-panel" data-panel="2"><div class="g2"><p style="font-size:26px;line-height:1.45">The frontal sinus recess is cannulated with a probe <b>behind the posterior wall of the agger nasi cell</b>.</p><div class="card tint"><span class="cn">Mucosa</span><p>Preserve the mucosa around the frontal recess. Stripping it produces postoperative stenosis and neo-osteogenesis.</p></div></div></div>
+      <div class="ix-panel" data-panel="3"><div class="g2"><p style="font-size:26px;line-height:1.45">Remove the posterior wall and the <b>cap</b> of the agger nasi cell. Removing the cap has the greatest single effect in widening the frontal recess. Front-to-back and side-to-side through-cutting giraffe forceps cut its medial wall.</p><div class="card tint2"><span class="cn">Aphorism</span><p>The agger nasi is the key to frontal sinus dissection.</p></div></div></div>
+      <div class="ix-panel" data-panel="4"><div class="g2"><p style="font-size:26px;line-height:1.45">With a 70&deg; endoscope, identify the <b>frontal sinus ostium</b> as the narrowest part of the frontal sinus. Remove ethmoidal partitions in the posterior frontal recess to create a smooth transition from posterior frontal table to anterior ethmoid skull base. A 45&deg; mushroom or Hosemann punch finishes the opening.</p><div class="card tint"><span class="cn">Endpoint</span><p>A mucosa-lined funnel, not a hole.</p></div></div></div>
+      <div class="ix-panel" data-panel="5"><div class="g2"><p style="font-size:26px;line-height:1.45">Wolfgang Draf's initial work in <b>1991</b> used the microscope for endonasal frontal recess dissection. The endoscopic modifications now in use &mdash; including type IIc through IIf variants &mdash; extend that same graded approach.</p><div class="card"><span class="cn">Reference</span><p class="src" style="font-size:17px">Eloy JA, V&aacute;zquez A, Liu JK, Baredes S. Endoscopic Approaches to the Frontal Sinus: Modifications of the Existing Techniques and Proposed Classification. Otolaryngol Clin North Am 2016;49(4):1007&ndash;18.</p></div></div></div>
+    </div>
+  </div>` },
+
+/* ---------- 27 CLOSING ---------- */
+{ id: 'closing', layout: 'standard', kicker: 'VIII &middot; Closing', title: 'Concluding the procedure',
+  notes: 'Hot saline is the underused trick when the field has deteriorated after two hours.',
+  html: `<div class="s-main">
+    <div class="g3 reveal">
+      <div class="card"><span class="cn">Irrigate &amp; inspect</span><p>Thoroughly irrigate the sinonasal cavity, remove small bone fragments, confirm haemostasis.</p></div>
+      <div class="card tint2"><span class="cn">Hot saline &mdash; 49&deg;C</span><p>Improves the surgical field after two hours of operating and significantly reduces blood loss.</p></div>
+      <div class="card tint"><span class="cn">Packing</span><p>Non-dissolvable packs in the middle meatus stay <b>3&ndash;7 days</b>. Inferior nasal packing, if used, usually comes out before discharge or within <b>24&ndash;72 hours</b> &mdash; a large gain in comfort.</p></div>
+    </div>
+    <div class="card plain reveal" style="margin-top:26px;border:1px solid var(--rule);padding:24px 28px">
+      <span class="cn">Middle turbinate medialisation suture</span>
+      <p>A suture on a Keith needle passes through the right middle turbinate and the septum; the needle is grabbed medial to the left middle turbinate, passed through it back into the septum to create a <b>figure-of-eight</b>, then tied down to the septum &mdash; leaving both middle turbinates medialised at the conclusion of the procedure.</p>
+    </div>
+    <p class="src reveal" style="margin-top:22px">Cummings Ed. 7 &mdash; Primary Sinus Surgery</p>
+  </div>` },
+
+/* ---------- 28 POSTOP ---------- */
+{ id: 'aftercare', layout: 'standard', kicker: 'IX &middot; Aftercare', title: 'The cavity is finished in clinic, not in theatre',
+  notes: 'Two rules that get broken: irrigate from day one, and never pull a fixed clot.',
+  html: `<div class="s-main">
+    <div class="g2 reveal">
+      <div class="card"><span class="cn">Discharge &amp; first days</span>
+        <ul class="bul tight"><li><b>Saline irrigation</b> from the day after surgery if there is no packing &mdash; it does much of the debridement for you</li><li>Short course of a nasal decongestant</li><li>Antibiotics only for purulent drainage or nasal packing</li><li>Intranasal corticosteroids as usual</li><li>Avoid strenuous activity, nose blowing and anything that raises bleeding risk</li></ul></div>
+      <div class="card tint"><span class="cn">First postoperative visit &mdash; day 5 to 7</span>
+        <ul class="bul tight"><li>Remove packing; examine the sinuses endoscopically</li><li><b>Remove loose crusts and clots</b> &mdash; this promotes mucosal healing</li><li><b>Do not remove fixed clots or crusts</b> &mdash; it damages mucosa, causes bleeding and scarring, and retards healing</li><li>Minor surgery, minor bleeding &rarr; daily irrigation is enough</li><li>Polyps, AFRS, frontal surgery &rarr; frequent debridement</li></ul></div>
+    </div>
+    <div class="note reveal" style="margin-top:28px">Success depends on ensuring that crusting and scarring do not obstruct the sinus ostia, and that the middle turbinate has not lateralised.</div>
+  </div>` },
+
+/* ---------- 29 COMPLICATIONS DIVIDER ---------- */
+{ id: 'cxdivider', layout: 'divider', kicker: 'X &middot; Complications', title: 'Complications of endoscopic sinus surgery',
+  notes: 'Transition. The first step in avoiding complications is prevention — and prevention is almost entirely preoperative.',
+  html: `<div class="s-main">
+    <div class="big-n">X</div>
+    <h2 class="reveal">Complications of<br>endoscopic sinus surgery</h2>
+    <div class="note reveal" style="margin-top:36px;max-width:1100px">The first step in avoiding complications is prevention.</div>
+    <p class="src reveal" style="margin-top:24px">Cummings Ed. 7 &middot; Bailey's Ch. 44 &mdash; Complications of Sinus Surgery</p>
+  </div>` },
+
+/* ---------- 30 COMPLICATION MAP ---------- */
+{ id: 'cxmap', layout: 'standard', kicker: 'X &middot; The map', title: 'Which step puts what at risk',
+  notes: 'Filter by the step you are about to do. Red dot = major complication.',
+  html: `<div class="s-main" data-ix="matrix">
+    <div class="ix-chips reveal">
+      <button class="chip" data-filter="all" aria-pressed="true">All steps</button>
+      <button class="chip" data-filter="mma">Antrostomy</button>
+      <button class="chip" data-filter="eth">Ethmoidectomy</button>
+      <button class="chip" data-filter="sph">Sphenoidotomy</button>
+      <button class="chip" data-filter="fr">Frontal</button>
+    </div>
+    <table class="plate dense reveal">
+      <tr><th style="width:34%">Complication</th><th style="width:31%">Step most implicated</th><th>Mechanism to keep in mind</th></tr>
+      <tr class="mx-row" data-tags="mma eth"><td class="key"><span class="sev major"></span>Orbital penetration &mdash; lamina papyracea, periorbita</td><td>Uncinectomy, bulla, antrostomy</td><td>Instrument travelling laterally; atelectatic uncinate; dehiscent lamina</td></tr>
+      <tr class="mx-row" data-tags="mma eth sph fr"><td class="key"><span class="sev major"></span>Orbital haemorrhage</td><td>Any ethmoid or antrostomy work</td><td>Ethmoidal arteries, or veins along the lamina</td></tr>
+      <tr class="mx-row" data-tags="mma eth fr"><td class="key"><span class="sev major"></span>Extraocular muscle injury</td><td>Antrostomy; frontal recess</td><td>Medial rectus behind the lamina; superior oblique at the frontal recess</td></tr>
+      <tr class="mx-row" data-tags="mma"><td class="key"><span class="sev minor"></span>Nasolacrimal duct injury &rarr; epiphora</td><td>Uncinectomy, antrostomy</td><td>Duct only 1&ndash;8 mm anterior to the uncinate root</td></tr>
+      <tr class="mx-row" data-tags="eth sph fr"><td class="key"><span class="sev major"></span>CSF leak / intracranial injury</td><td>Ethmoid, sphenoid, frontal</td><td>Thin bone medial to the AEA; low cribriform plate (Keros 3)</td></tr>
+      <tr class="mx-row" data-tags="sph"><td class="key"><span class="sev major"></span>Internal carotid artery injury</td><td>Sphenoidotomy</td><td>Dehiscence in 23%; intersinus septum inserting on the carotid</td></tr>
+      <tr class="mx-row" data-tags="sph"><td class="key"><span class="sev major"></span>Optic nerve injury</td><td>Sphenoidotomy, Onodi cell</td><td>Lateral wall instrumentation; no proven treatment for direct injury</td></tr>
+      <tr class="mx-row" data-tags="mma eth sph fr"><td class="key"><span class="sev minor"></span>Haemorrhage &mdash; sphenopalatine branches</td><td>Posterior antrostomy, sphenoidotomy</td><td>Posterior septal and posterior lateral nasal branches; usually cauterised</td></tr>
+      <tr class="mx-row" data-tags="eth sph fr"><td class="key"><span class="sev minor"></span>Anosmia / hyposmia</td><td>Sphenoidotomy, superior turbinate</td><td>Over-resection of the superior turbinate injures olfactory fibres</td></tr>
+      <tr class="mx-row" data-tags="mma eth fr"><td class="key"><span class="sev minor"></span>Synechiae, ostial stenosis, lateralised turbinate</td><td>Any step; declares itself in clinic</td><td>Mucosal stripping, rough turbinate handling, missed debridement</td></tr>
+    </table>
+    <p class="src reveal" style="margin-top:20px"><span class="sev major"></span>Major &nbsp;&nbsp;<span class="sev minor"></span>Minor &middot; Cummings Ed. 7 &middot; Bailey's Ch. 44</p>
+  </div>` },
+
+/* ---------- 31 VASCULAR ---------- */
+{ id: 'vascular', layout: 'standard', kicker: 'X &middot; Vascular', title: 'Three vessels worth naming',
+  notes: 'The 24-12-6 rule from the anterior lacrimal crest: anterior ethmoidal 24, posterior 12, optic nerve 6 mm further back.',
+  html: `<div class="s-main">
+    <div class="g3 reveal">
+      <div class="card"><span class="cn">01 &mdash; Ethmoidal arteries</span><h4>AEA &amp; PEA</h4>
+        <p>If bleeding cannot be stopped endoscopically, go external through a <b>Lynch incision</b> and ligate with endoscopic clip appliers or bipolar cautery.</p>
+        <div class="note sm" style="margin-top:14px">Follow the <b style="font-style:normal">24 / 12 / 6 mm</b> rule from the anterior lacrimal crest.</div></div>
+      <div class="card"><span class="cn">02 &mdash; Sphenopalatine branches</span><h4>Posterior septal &amp; posterior lateral nasal</h4>
+        <ul class="bul tight"><li><b>Posterior septal artery</b> &mdash; below the ostium on the face of the sphenoid; at risk in a wide sphenoidotomy</li><li><b>Posterior lateral nasal artery</b> &mdash; at the inferior end of the middle turbinate; at risk in antrostomy and turbinectomy</li></ul>
+        <p style="margin-top:12px">Controlled endoscopically with electrocautery in most cases.</p></div>
+      <div class="card tint"><span class="cn">03 &mdash; Internal carotid artery</span><h4>The one that must not happen</h4>
+        <p>At risk in sphenoidotomy and intersinus septum removal. <b>Dehiscent in 23%.</b></p>
+        <ul class="bul tight" style="margin-top:12px"><li>Assess the bone between carotid and sinus on CT</li><li>Avoid trauma to the intersinus septum &mdash; it often attaches to the carotid</li><li>Do not advance forceps or suction blindly into the sphenoid</li><li>Perform the sphenoidotomy <b>inferomedially</b></li></ul></div>
+    </div>
+    <p class="src reveal" style="margin-top:22px">Weidenbecher M, Huk WJ, Iro H. Eur Arch Otorhinolaryngol 2005;262(8):640&ndash;5 &middot; Moeller CW, Welch KC. Otolaryngol Clin North Am 2010;43(4):839&ndash;54</p>
+  </div>` },
+
+/* ---------- 32 ORBITAL HAEMATOMA ---------- */
+{ id: 'orbital', layout: 'standard', kicker: 'X &middot; Orbit', title: 'Preseptal or postseptal, arterial or venous',
+  notes: 'The two axes that matter: which compartment, and how fast. Arterial gives you 15-30 minutes; venous 60-90.',
+  html: `<div class="s-main">
+    <div class="g2 reveal" style="margin-bottom:24px">
+      <div class="card"><span class="cn">Preseptal haematoma</span>
+        <ul class="bul tight"><li>Ecchymosis &mdash; darker, more diffuse</li><li>Eyelid oedema</li><li>Subcutaneous emphysema</li><li>Classically after Caldwell&ndash;Luc or external ethmoidectomy</li></ul>
+        <p style="margin-top:12px">Resolves spontaneously in <b>7&ndash;10 days</b>. Avoid nasal packing and nose blowing for 4 days; prophylactic antibiotics to prevent orbital cellulitis.</p></div>
+      <div class="card tint"><span class="cn">Postseptal haematoma</span>
+        <ul class="bul tight"><li>Raised intraocular pressure (&gt; 21 mmHg)</li><li>Marked proptosis</li><li>Chemosis</li><li>Pupillary change &mdash; anisocoria</li><li>Classically after endoscopic ethmoidectomy</li></ul></div>
+    </div>
+    <div class="g2 reveal">
+      <div class="card tint"><span class="cn">Arterial &mdash; minutes</span><p>Expanding haematoma from the anterior or posterior ethmoidal artery. The eye tolerates roughly <b>15&ndash;30 minutes</b>. Proptosis, lid oedema, subconjunctival haemorrhage, mydriasis, retro-orbital pain, diplopia, falling acuity, blindness.</p></div>
+      <div class="card tint2"><span class="cn">Venous &mdash; hours</span><p>Slowly progressive, from veins along the lamina papyracea. Tolerated for roughly <b>60&ndash;90 minutes</b>; may only declare itself postoperatively.</p></div>
+    </div>
+    <p class="src reveal" style="margin-top:20px">Welch KC, Palmer JN. Otolaryngol Clin North Am 2008;41(3):581&ndash;96 &middot; Cummings Ed. 7</p>
+  </div>` },
+
+/* ---------- 33 ORBITAL ALGORITHM ---------- */
+{ id: 'orbalgo', layout: 'standard', kicker: 'X &middot; Emergency', title: 'Orbital haemorrhage: the next fifteen minutes',
+  notes: 'Rehearse this out loud. The decision to decompress is clinical and must not wait for imaging.',
+  html: `<div class="s-main" data-ix="steps">
+    <div class="ix-rail reveal">
+      <button class="ix-stop" data-step="0" aria-selected="true"><span class="sn">00</span><span class="st">Recognise</span></button>
+      <button class="ix-stop" data-step="1"><span class="sn">01</span><span class="st">Stop &amp; unpack</span></button>
+      <button class="ix-stop" data-step="2"><span class="sn">02</span><span class="st">Call ophthalmology</span></button>
+      <button class="ix-stop" data-step="3"><span class="sn">03</span><span class="st">Massage &amp; medicate</span></button>
+      <button class="ix-stop" data-step="4"><span class="sn">04</span><span class="st">Decompress</span></button>
+    </div>
+    <div class="reveal ix-panels">
+      <div class="ix-panel on" data-panel="0"><div class="g2">
+        <div class="card"><span class="cn">Intraoperative signs</span><ul class="bul tight"><li>Proptosis, tense globe</li><li>Fat protrusion &mdash; confirm with the <b>bulb press test</b></li><li>Ecchymosis, chemosis, pupil change</li></ul></div>
+        <div class="card tint"><span class="cn">Then decide the clock</span><p>Arterial: <b>15&ndash;30 min</b>. Venous: <b>60&ndash;90 min</b>. Treat every case as arterial until proven otherwise.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="1"><div class="g2">
+        <div class="card"><span class="cn">Step 01</span><h4>Stop the procedure, remove nasal packing</h4><p>Packing raises orbital pressure and prevents decompression through the surgical defect.</p></div>
+        <div class="card plain"><p style="font-size:24px">Do not finish the case first. The operation stops here.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="2"><div class="g2">
+        <div class="card"><span class="cn">Step 02</span><h4>Urgent ophthalmology consultation</h4><p>Acuity, pupil, intraocular pressure, fundus &mdash; the findings that decide whether the eye is being lost.</p></div>
+        <div class="card plain"><p style="font-size:24px">Call while you begin treatment, not after.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="3"><div class="g2">
+        <div class="card"><span class="cn">Step 03</span><h4>Orbital massage and IOP-lowering agents</h4><p><b>Mannitol &middot; dexamethasone &middot; acetazolamide.</b> Massage redistributes pressure while medical measures take effect.</p></div>
+        <div class="card tint"><span class="cn">Failure of medical treatment is itself an indication</span><p>If pressure and vision do not respond, proceed to surgery.</p></div>
+      </div></div>
+      <div class="ix-panel" data-panel="4"><div class="g2">
+        <div class="card tint"><span class="cn">Indications for surgery</span><ol class="num"><li>IOP &gt; 40 mmHg</li><li>Afferent pupillary defect, poor or worsening acuity</li><li>Severe retro-orbital pain</li><li>Pale retina with a cherry-red macula</li></ol></div>
+        <div class="card"><span class="cn">Procedures &amp; expected drop</span><ul class="bul tight"><li><b>Lateral canthotomy + inferior cantholysis</b> &mdash; lowers IOP by about 14&ndash;30 mmHg</li><li><b>Orbital decompression</b> &mdash; a further 10 mmHg</li></ul></div>
+      </div></div>
+    </div>
+    <p class="src reveal" style="margin-top:22px">Ulualp SO. Curr Opin Otolaryngol Head Neck Surg 2008;16(3):252&ndash;259</p>
+  </div>` },
+
+/* ---------- 34 EOM / NLD / OPTIC ---------- */
+{ id: 'eomnld', layout: 'standard', kicker: 'X &middot; Orbit', title: 'Muscle, duct, nerve',
+  notes: 'Entrapment needs immediate surgery; a transected medial rectus is a specialist repair. Click each card.',
+  html: `<div class="s-main">
+    <div class="g3 reveal">
+      <div class="card ix-reveal" data-ix="reveal"><span class="cn">Extraocular muscle</span><h4>Medial rectus &amp; superior oblique</h4>
+        <p>The posterior medial rectus, lying against the lamina, is at highest risk during antrostomy. Frontal sinus surgery injures the orbit at the frontal recess, whose lateral wall is the lamina &mdash; putting the superior oblique at risk.</p>
+        <div class="rv-hint">Four patterns of injury</div>
+        <div class="rv-body"><ol class="num"><li>Complete transection</li><li>Partial transection</li><li>Contusion or intramuscular haematoma</li><li><b>Entrapment</b> &mdash; requires immediate surgery</li></ol></div></div>
+
+      <div class="card ix-reveal" data-ix="reveal"><span class="cn">Nasolacrimal duct</span><h4>Epiphora &mdash; 0.1&ndash;1.7%</h4>
+        <p>Injured during uncinectomy, especially of the vertical portion, and during antrostomy carried too far anteriorly.</p>
+        <div class="rv-hint">Management</div>
+        <div class="rv-body"><ul class="bul tight"><li>Duct injury alone &mdash; usually heals spontaneously; observe</li><li>Epiphora from established obstruction &mdash; dacryocystorhinostomy &plusmn; stent</li></ul></div></div>
+
+      <div class="card ix-reveal tint" data-ix="reveal"><span class="cn">Optic nerve</span><h4>Direct and indirect injury</h4>
+        <p><b>Direct</b> &mdash; sphenoid sinus surgery; no proven treatment. <b>Indirect</b> &mdash; from orbital haemorrhage.</p>
+        <div class="rv-hint">What can be done</div>
+        <div class="rv-body"><ul class="bul tight"><li>Indirect: canthotomy, cantholysis, orbital decompression</li><li>Corticosteroid and optic nerve decompression &mdash; inadequate data</li><li><b>Prevention is the treatment:</b> preoperative CT evaluation</li></ul></div></div>
+    </div>
+    <p class="src reveal" style="margin-top:24px">Ulualp SO 2008 &middot; Cummings Ed. 7</p>
+  </div>` },
+
+/* ---------- 35 INTRACRANIAL ---------- */
+{ id: 'intracranial', layout: 'standard', kicker: 'X &middot; Skull base', title: 'Where the anterior skull base gives way',
+  notes: 'The classic site: medial roof, posterior to the anterior ethmoidal artery. Ten times thinner, with dura firmly adherent.',
+  html: `<div class="s-main">
+    <div class="g-32 reveal">
+      <div class="stack">
+        <div class="card tint"><span class="cn">The thin place</span>
+          <p>The medial part of the ethmoid roof, posterior to the medial portion of the anterior ethmoidal artery and running to the sphenoid, is about <b>ten times thinner</b> than the rest of the bone and is easily penetrated. The dura is tightly attached &mdash; remove bone here and the skull base usually tears with it.</p></div>
+        <div class="card"><span class="cn">The low place</span>
+          <p>Where the fovea ethmoidalis and cribriform plate sit lower than usual (<b>Keros type 3</b>), dissection superiorly along the medial aspect of the middle turbinate risks penetrating the skull base.</p></div>
+      </div>
+      <div class="card tint2" style="align-self:start"><span class="cn">If the leak is not obvious</span>
+        <p>Where endoscopic examination fails to identify the source, a <b>CT cisternogram</b>, or intrathecal fluorescein (off-label) with endoscopy, may localise it.</p>
+        <div class="note sm" style="margin-top:18px">Penetration can occur anywhere. These two sites simply account for most of it.</div></div>
+    </div>
+    <p class="src reveal" style="margin-top:24px">Cummings Ed. 7 &middot; Cummings Ed. 6 &mdash; Cerebrospinal Fluid Rhinorrhea</p>
+  </div>` },
+
+/* ---------- 36 CSF LEAK ---------- */
+{ id: 'csf', layout: 'standard', kicker: 'X &middot; Skull base', title: 'CSF leak: close it by size',
+  notes: 'Under 10 mm, plug or graft. Over that, you need rigid support. Never a mucosal flap as underlay.',
+  html: `<div class="s-main">
+    <div class="g2 reveal" style="margin-bottom:26px">
+      <div class="card"><span class="cn">Defect under 10 mm</span><h4>Plug or graft</h4>
+        <p>Closed by an inlay graft or simply by plugging the defect with tissue; overlay and underlay grafting, with fibrin glue useful for sealing and healing.</p></div>
+      <div class="card tint"><span class="cn">Large defect</span><h4>Bridge it with rigid material</h4>
+        <p>Bone or cartilage bridges the gap and prevents encephalocele formation.</p></div>
+    </div>
+    <div class="g2 reveal">
+      <div class="card tint2"><span class="cn">Two rules</span>
+        <ul class="bul tight"><li><b>Do not use a mucosal flap as an underlay</b> &mdash; it produces a mucocele</li><li>Head elevated 15&ndash;30&deg; afterwards</li></ul></div>
+      <div class="card"><span class="cn">Delayed leaks</span>
+        <p>Challenging, because the site is difficult to ascertain. Small leaks often close spontaneously, but <b>surgery should be considered for any leak lasting longer than 2&ndash;3 weeks</b>.</p></div>
+    </div>
+    <p class="src reveal" style="margin-top:22px">Cummings Ed. 6 &amp; 7 &middot; Operative Techniques in Otolaryngology 2011;22(3)</p>
+  </div>` },
+
+/* ---------- 37 QUIZ ---------- */
+{ id: 'quiz', layout: 'standard', kicker: 'XII &middot; Self-check', title: 'Six questions on the way out',
+  notes: 'Let the room answer before you click. The wrong answers are the common misconceptions.',
+  html: `<div class="s-main" data-ix="quiz">
+    <div class="ix-tabs reveal" style="margin-bottom:22px">
+      <button class="ix-tab" data-tab="0" aria-selected="true">Q1</button>
+      <button class="ix-tab" data-tab="1">Q2</button>
+      <button class="ix-tab" data-tab="2">Q3</button>
+      <button class="ix-tab" data-tab="3">Q4</button>
+      <button class="ix-tab" data-tab="4">Q5</button>
+      <button class="ix-tab" data-tab="5">Q6</button>
+    </div>
+    <div class="reveal ix-panels">
+      <div class="ix-panel on" data-panel="0">
+        <div class="quiz-q">How far anterior to the root of the uncinate process does the nasolacrimal duct lie?</div>
+        <div class="quiz-opts">
+          <button class="quiz-opt" data-q><span class="ltr">A</span><span>Directly at the root, with no intervening distance</span></button>
+          <button class="quiz-opt" data-q data-correct><span class="ltr">B</span><span>1 to 8 mm anterior</span></button>
+          <button class="quiz-opt" data-q><span class="ltr">C</span><span>10 to 15 mm anterior</span></button>
+        </div>
+        <div class="quiz-fb"><b>1&ndash;8 mm.</b> That margin is why the first bite of a retrograde uncinectomy is taken low and posteriorly, and why an anterograde sickle knife carries the higher duct risk.</div>
+      </div>
+      <div class="ix-panel" data-panel="1">
+        <div class="quiz-q">An antrostomy extended to within 0.5 cm of the posterior maxillary wall risks which structure?</div>
+        <div class="quiz-opts">
+          <button class="quiz-opt" data-q><span class="ltr">A</span><span>Anterior ethmoidal artery</span></button>
+          <button class="quiz-opt" data-q data-correct><span class="ltr">B</span><span>A branch of the sphenopalatine artery</span></button>
+          <button class="quiz-opt" data-q><span class="ltr">C</span><span>Infraorbital nerve</span></button>
+        </div>
+        <div class="quiz-fb"><b>Sphenopalatine branch.</b> The posterior lateral nasal artery is the usual culprit; cautery controls it endoscopically in most cases.</div>
+      </div>
+      <div class="ix-panel" data-panel="2">
+        <div class="quiz-q">Where should the sphenoid ostium be sought?</div>
+        <div class="quiz-opts">
+          <button class="quiz-opt" data-q><span class="ltr">A</span><span>Superolateral, above the level of the maxillary sinus roof</span></button>
+          <button class="quiz-opt" data-q data-correct><span class="ltr">B</span><span>Medial and inferior, 1&ndash;1.5 cm above the choana, never above the maxillary roof line</span></button>
+          <button class="quiz-opt" data-q><span class="ltr">C</span><span>Lateral to the superior turbinate</span></button>
+        </div>
+        <div class="quiz-fb"><b>Medial and inferior.</b> Lateral to the superior turbinate you are in posterior ethmoid cells; superolaterally you are approaching the optic nerve and carotid.</div>
+      </div>
+      <div class="ix-panel" data-panel="3">
+        <div class="quiz-q">Intraoperative orbital haemorrhage from an arterial source: how long does the eye tolerate it?</div>
+        <div class="quiz-opts">
+          <button class="quiz-opt" data-q data-correct><span class="ltr">A</span><span>Roughly 15 to 30 minutes</span></button>
+          <button class="quiz-opt" data-q><span class="ltr">B</span><span>Roughly 60 to 90 minutes</span></button>
+          <button class="quiz-opt" data-q><span class="ltr">C</span><span>Several hours if the globe is soft</span></button>
+        </div>
+        <div class="quiz-fb"><b>15&ndash;30 minutes</b> for arterial; 60&ndash;90 for venous. Which is why packing comes out and ophthalmology is called in the same breath.</div>
+      </div>
+      <div class="ix-panel" data-panel="4">
+        <div class="quiz-q">Which single manoeuvre most widens the frontal recess?</div>
+        <div class="quiz-opts">
+          <button class="quiz-opt" data-q><span class="ltr">A</span><span>Resecting the middle turbinate</span></button>
+          <button class="quiz-opt" data-q data-correct><span class="ltr">B</span><span>Removing the cap of the agger nasi cell</span></button>
+          <button class="quiz-opt" data-q><span class="ltr">C</span><span>Widening the maxillary antrostomy</span></button>
+        </div>
+        <div class="quiz-fb"><b>The agger nasi cap.</b> The agger nasi is the key to frontal sinus dissection &mdash; and the frontal recess is opened last, once bleeding from below has been dealt with.</div>
+      </div>
+      <div class="ix-panel" data-panel="5">
+        <div class="quiz-q">Before ESS, which preoperative medication has evidence for improving the surgical field?</div>
+        <div class="quiz-opts">
+          <button class="quiz-opt" data-q><span class="ltr">A</span><span>Broad-spectrum antibiotics for 7 days</span></button>
+          <button class="quiz-opt" data-q data-correct><span class="ltr">B</span><span>Corticosteroids</span></button>
+          <button class="quiz-opt" data-q><span class="ltr">C</span><span>Tranexamic acid alone</span></button>
+        </div>
+        <div class="quiz-fb"><b>Corticosteroids.</b> EPOS 2020: use nasal corticosteroids before ESS; no other medication has been shown to improve the surgical field and outcome &mdash; antibiotics are not helpful.</div>
+      </div>
+    </div>
+  </div>` },
+
+/* ---------- 38 TAKEAWAYS ---------- */
+{ id: 'takeaways', layout: 'standard', kicker: 'Close', title: 'Six things to carry out of the room',
+  notes: 'If nothing else survives the talk, these six should.',
+  html: `<div class="s-main">
+    <div class="g3 reveal" style="gap:24px">
+      <div class="card"><span class="cn">01</span><h4>Functional means physiological</h4><p>Include the natural ostium, ventilate, clear, and make the cavity reachable by topical therapy.</p></div>
+      <div class="card"><span class="cn">02</span><h4>The scan is the first operative step</h4><p>Six anatomical variants, read on both sides, before you scrub.</p></div>
+      <div class="card"><span class="cn">03</span><h4>Known to unknown</h4><p>Define the lamina, the basal lamella and the skull base before dissecting along any of them.</p></div>
+      <div class="card"><span class="cn">04</span><h4>Enter low, medial, and away from the orbit</h4><p>True of the bulla, the antrostomy and the sphenoid alike.</p></div>
+      <div class="card"><span class="cn">05</span><h4>Mucosa is the graft you already have</h4><p>Stripping the frontal recess buys stenosis and neo-osteogenesis.</p></div>
+      <div class="card tint"><span class="cn">06</span><h4>Rehearse the orbit</h4><p>Stop, unpack, call, massage, medicate, decompress &mdash; in that order, inside fifteen minutes.</p></div>
+    </div>
+    <div class="note reveal" style="margin-top:30px">The first step in avoiding complications is prevention.</div>
+  </div>` },
+
+/* ---------- 39 REFERENCES ---------- */
+{ id: 'refs', layout: 'standard', kicker: 'Sources', title: 'References',
+  notes: '',
+  html: `<div class="s-main">
+    <div class="g2 reveal" style="gap:44px">
+      <ul class="bul tight">
+        <li>Cummings Otolaryngology, Ed. 7 &mdash; Primary Sinus Surgery</li>
+        <li>Cummings Otolaryngology, Ed. 6 &mdash; Cerebrospinal Fluid Rhinorrhea; Concepts of Endoscopic Sinus Surgery: Causes of Failure (Ed. 5)</li>
+        <li>Bailey's Head and Neck Surgery, Ch. 44 &mdash; Complications of Sinus Surgery</li>
+        <li>EPOS 2020 &middot; ICAR-RS 2021</li>
+        <li>Wormald PJ. Endoscopic Sinus Surgery: Anatomy, Three-dimensional Reconstruction, and Surgical Technique</li>
+        <li>Sammen D. et al. Manual of Endoscopic Sinus Surgery</li>
+        <li>Atlas of Endoscopic Sinus and Skull Base Surgery, 2013</li>
+      </ul>
+      <ul class="bul tight">
+        <li>Higgins TS et al. Systematic Review of Topical Vasoconstrictors in Endoscopic Sinus Surgery. Laryngoscope 2011</li>
+        <li>Pant H. Hemostasis in Endoscopic Sinus Surgery. Otolaryngol Clin N Am 2016;49:655&ndash;676</li>
+        <li>Ashman A, Psaltis AJ, Wormald PJ, Tan NC-W. Extended endoscopic approaches to the maxillary sinus. J Laryngol Otol 2020;134(6):473&ndash;480</li>
+        <li>Eloy JA et al. Endoscopic Approaches to the Frontal Sinus. Otolaryngol Clin North Am 2016;49(4):1007&ndash;18</li>
+        <li>Welch KC, Palmer JN. Intraoperative emergencies during ESS. Otolaryngol Clin North Am 2008;41(3):581&ndash;96</li>
+        <li>Ulualp SO. Complications of endoscopic sinus surgery. Curr Opin Otolaryngol Head Neck Surg 2008;16(3):252&ndash;259</li>
+        <li>Weidenbecher M, Huk WJ, Iro H. Eur Arch Otorhinolaryngol 2005;262(8):640&ndash;5 &middot; Moeller CW, Welch KC. Otolaryngol Clin North Am 2010;43(4):839&ndash;54</li>
+        <li>Basic and Clinical Pharmacology, 13th Ed. &mdash; Adrenoceptor Agonists &amp; Sympathomimetic Drugs</li>
+      </ul>
+    </div>
+  </div>` }
+
+);
+
+/* ===========================================
+   DECK ENGINE
+   Sections below, in order:
+     1. State + storage        4. Interactive components
+     2. Slide rendering        5. Editor
+     3. Presentation control   6. Boot
+   =========================================== */
+(function () {
+'use strict';
+
+/* ===========================================
+   1. STATE + STORAGE
+   Priority: this browser's saved edits > content baked into the
+   file by a previous export > the deck authored above.
+   =========================================== */
+const STORE_KEY = 'ess-deck-v1';
+const clone = o => JSON.parse(JSON.stringify(o));
+
+function bakedDeck() {
+  const el = document.getElementById('userDeck');
+  if (!el || !el.textContent.trim()) return null;
+  try { return JSON.parse(el.textContent); } catch (e) { return null; }
+}
+function savedDeck() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+const BASE = bakedDeck() || clone(DECK_DEFAULT);
+let state = savedDeck() || clone(BASE);
+if (!state.slides || !state.slides.length) state = clone(BASE);
+
+let current = 0;      // slide shown in Present
+let editIdx = 0;      // slide open in Edit
+let saveTimer = null;
+
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
+    const flag = document.getElementById('saveFlag');
+    if (flag.textContent === 'Saved') {
+      flag.classList.add('show');
+      setTimeout(() => flag.classList.remove('show'), 1400);
+    }
+  }, 450);
+}
+
+/* ===========================================
+   2. SLIDE RENDERING
+   A slide object becomes a <section class="slide"> at 1920x1080.
+   Running head, plate number and frame are chrome the renderer
+   supplies, so editing a slide body can never break them.
+   =========================================== */
+function romanish(i) { return String(i + 1).padStart(2, '0'); }
+
+function slideMarkup(s, i, total) {
+  const chrome = `
+    <div class="s-frame"></div><div class="s-crop tl"></div><div class="s-crop br"></div>
+    <div class="s-run"><span>${escapeHtml(state.meta.title)}</span><span class="plate">PL. ${romanish(i)} / ${String(total).padStart(2, '0')}</span></div>`;
+
+  if (s.layout === 'cover') return s.html;
+
+  const head = s.layout === 'divider' ? '' : `
+    <div class="shead">
+      ${s.kicker ? `<div class="kicker reveal">${s.kicker}</div>` : ''}
+      <h2 class="stitle reveal">${s.title}</h2>
+    </div>`;
+
+  return `${chrome}<div class="s-body">${head}${s.html}</div>`;
+}
+
+function buildSlide(s, i, total) {
+  const sec = document.createElement('section');
+  sec.className = 'slide' + (s.layout === 'cover' ? ' cover' : '') + (s.layout === 'divider' ? ' divider' : '');
+  sec.dataset.id = s.id;
+  sec.dataset.index = i;
+  sec.innerHTML = slideMarkup(s, i, total);
+  sec.querySelectorAll('[data-deck]').forEach(el => {
+    const k = el.getAttribute('data-deck');
+    if (state.meta[k]) el.textContent = state.meta[k];
+  });
+  return sec;
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function stripTags(html) {
+  const d = document.createElement('div'); d.innerHTML = html; return d.textContent.trim();
+}
+
+/* Full deck render (Present tab) */
+const stage = document.getElementById('deckStage');
+function renderDeck() {
+  stage.innerHTML = '';
+  state.slides.forEach((s, i) => stage.appendChild(buildSlide(s, i, state.slides.length)));
+  document.getElementById('totNo').textContent = String(state.slides.length).padStart(2, '0');
+  document.getElementById('brandTitle').textContent = state.meta.title;
+  document.title = state.meta.title;
+  if (current >= state.slides.length) current = state.slides.length - 1;
+  showSlide(current, true);
+  renderOverview();
+}
+
+/* ===========================================
+   3. PRESENTATION CONTROL
+   Fixed 16:9 stage, scaled as a whole. Slides are switched with
+   .active / .visible only — never display:none.
+   =========================================== */
+function fitStage(el, box, pad) {
+  const w = box.clientWidth - pad * 2, h = box.clientHeight - pad * 2;
+  if (w <= 0 || h <= 0) return;
+  const f = Math.min(w / 1920, h / 1080);
+  const x = (box.clientWidth - 1920 * f) / 2, y = (box.clientHeight - 1080 * f) / 2;
+  el.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + f + ')';
+}
+function fitAll() {
+  fitStage(stage, document.querySelector('.view-present .deck-viewport'), 0);
+  const wrap = document.getElementById('edStageWrap');
+  if (wrap.clientWidth) fitStage(document.getElementById('editStage'), wrap, 22);
+}
+window.addEventListener('resize', fitAll);
+
+function showSlide(i, force) {
+  const n = state.slides.length;
+  const next = Math.max(0, Math.min(i, n - 1));
+  if (next === current && !force) return;
+  current = next;
+  [...stage.children].forEach((el, idx) => {
+    el.classList.toggle('active', idx === current);
+    el.classList.toggle('visible', idx === current);
+  });
+  document.getElementById('curNo').textContent = romanish(current);
+  document.getElementById('progressBar').style.width = ((current + 1) / n * 100) + '%';
+  const s = state.slides[current];
+  document.getElementById('notesTitle').textContent = stripTags(s.title || '');
+  document.getElementById('notesBody').textContent = s.notes || 'No notes for this slide.';
+  document.querySelectorAll('#ovGrid .ov-card').forEach((c, idx) => c.classList.toggle('cur', idx === current));
+}
+const next = () => showSlide(current + 1);
+const prev = () => showSlide(current - 1);
+
+function gotoId(id) {
+  const i = state.slides.findIndex(s => s.id === id);
+  if (i >= 0) { closeOverlays(); showSlide(i); }
+}
+
+/* Overview grid */
+function renderOverview() {
+  const g = document.getElementById('ovGrid');
+  g.innerHTML = '';
+  state.slides.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'ov-card' + (i === current ? ' cur' : '');
+    b.innerHTML = `<span class="ov-n">${romanish(i)}</span>
+      <span class="ov-k">${stripTags(s.kicker || '')}</span>
+      <span class="ov-t">${stripTags(s.title || 'Untitled')}</span>`;
+    b.addEventListener('click', () => { closeOverlays(); showSlide(i); });
+    g.appendChild(b);
+  });
+}
+
+/* Chrome toggles */
+const app = document.getElementById('app');
+const overview = document.getElementById('overview');
+const notesPanel = document.getElementById('notesPanel');
+function closeOverlays() {
+  overview.classList.remove('on');
+  document.getElementById('btnOverview').classList.remove('on');
+}
+document.getElementById('btnOverview').addEventListener('click', e => {
+  overview.classList.toggle('on'); e.currentTarget.classList.toggle('on', overview.classList.contains('on'));
+});
+document.getElementById('btnNotes').addEventListener('click', e => {
+  notesPanel.classList.toggle('on'); e.currentTarget.classList.toggle('on', notesPanel.classList.contains('on'));
+});
+document.getElementById('btnFocus').addEventListener('click', () => toggleFocus());
+function toggleFocus() {
+  const on = app.dataset.focus === 'on';
+  app.dataset.focus = on ? 'off' : 'on';
+  if (!on && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+  else if (on && document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  requestAnimationFrame(fitAll);
+}
+document.getElementById('btnNext').addEventListener('click', next);
+document.getElementById('btnPrev').addEventListener('click', prev);
+
+/* Keyboard */
+document.addEventListener('keydown', e => {
+  const typing = e.target.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
+  if (typing) return;
+  const presenting = mode === 'present';
+  switch (e.key) {
+    case 'ArrowRight': case 'PageDown': case ' ': if (presenting) { e.preventDefault(); next(); } break;
+    case 'ArrowLeft': case 'PageUp': if (presenting) { e.preventDefault(); prev(); } break;
+    case 'Home': if (presenting) showSlide(0); break;
+    case 'End': if (presenting) showSlide(state.slides.length - 1); break;
+    case 'o': case 'O': if (presenting) document.getElementById('btnOverview').click(); break;
+    case 'n': case 'N': if (presenting) document.getElementById('btnNotes').click(); break;
+    case 'f': case 'F': if (presenting) toggleFocus(); break;
+    case 'e': case 'E': setMode('edit'); break;
+    case 'p': case 'P': setMode('present'); break;
+    case 'Escape':
+      closeOverlays(); notesPanel.classList.remove('on');
+      document.getElementById('btnNotes').classList.remove('on');
+      if (app.dataset.focus === 'on') toggleFocus();
+      break;
+  }
+});
+
+/* Wheel + touch */
+let wheelLock = 0;
+document.querySelector('.view-present').addEventListener('wheel', e => {
+  if (overview.classList.contains('on')) return;
+  const now = Date.now();
+  if (now - wheelLock < 620 || Math.abs(e.deltaY) < 24) return;
+  wheelLock = now;
+  e.deltaY > 0 ? next() : prev();
+}, { passive: true });
+
+let tx = 0, ty = 0;
+document.querySelector('.view-present').addEventListener('touchstart', e => {
+  tx = e.changedTouches[0].clientX; ty = e.changedTouches[0].clientY;
+}, { passive: true });
+document.querySelector('.view-present').addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
+  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) dx < 0 ? next() : prev();
+}, { passive: true });
+
+/* ===========================================
+   4. INTERACTIVE COMPONENTS
+   One delegated listener per stage. Components are declared with
+   data-attributes in the slide body, so they survive editing,
+   re-ordering and re-rendering.
+     [data-tab]/[data-step]/[data-hot] -> switch .ix-panel
+     [data-filter]  -> filter matrix rows by data-tags
+     [data-q]       -> quiz answer + feedback
+     [data-ck]      -> checklist toggle
+     .ix-reveal     -> expand hidden detail
+     [data-jump]    -> jump to a slide id
+     [data-calc-*]  -> weight-based dose calculator
+   =========================================== */
+function selectIn(group, attr, idx) {
+  group.querySelectorAll('[' + attr + ']').forEach(b => b.setAttribute('aria-selected', String(Number(b.getAttribute(attr)) === idx)));
+  group.querySelectorAll('.ix-panel').forEach(p => p.classList.toggle('on', Number(p.getAttribute('data-panel')) === idx));
+}
+
+function wireInteractions(root) {
+  root.addEventListener('click', e => {
+    if (e.target.closest('[contenteditable="true"]')) return;
+    const t = e.target;
+
+    const tab = t.closest('[data-tab]');
+    if (tab) { selectIn(tab.closest('[data-ix]') || root, 'data-tab', Number(tab.getAttribute('data-tab'))); return; }
+
+    const step = t.closest('[data-step]');
+    if (step) { selectIn(step.closest('[data-ix]') || root, 'data-step', Number(step.getAttribute('data-step'))); return; }
+
+    const hot = t.closest('[data-hot]');
+    if (hot) { selectIn(hot.closest('[data-ix]') || root, 'data-hot', Number(hot.getAttribute('data-hot'))); return; }
+
+    const chip = t.closest('[data-filter]');
+    if (chip) {
+      const g = chip.closest('[data-ix]');
+      g.querySelectorAll('[data-filter]').forEach(c => c.setAttribute('aria-pressed', String(c === chip)));
+      const f = chip.getAttribute('data-filter');
+      g.querySelectorAll('.mx-row').forEach(r => {
+        const hit = f === 'all' || (r.getAttribute('data-tags') || '').split(' ').includes(f);
+        r.classList.toggle('dim', !hit);
+        r.classList.toggle('hit', hit && f !== 'all');
+      });
+      return;
+    }
+
+    const opt = t.closest('[data-q]');
+    if (opt) {
+      const panel = opt.closest('.ix-panel') || opt.closest('[data-ix]');
+      const answered = panel.querySelector('.quiz-opt.right, .quiz-opt.wrong');
+      if (answered) {
+        panel.querySelectorAll('.quiz-opt').forEach(o => o.classList.remove('right', 'wrong'));
+        panel.querySelector('.quiz-fb').classList.remove('on');
+        return;
+      }
+      panel.querySelectorAll('[data-q]').forEach(o => {
+        if (o.hasAttribute('data-correct')) o.classList.add('right');
+        else if (o === opt) o.classList.add('wrong');
+      });
+      panel.querySelector('.quiz-fb').classList.add('on');
+      return;
+    }
+
+    const ck = t.closest('[data-ck]');
+    if (ck) { ck.classList.toggle('on'); return; }
+
+    const rev = t.closest('.ix-reveal');
+    if (rev) { rev.classList.toggle('open'); return; }
+
+    const jmp = t.closest('[data-jump]');
+    if (jmp) { gotoId(jmp.getAttribute('data-jump')); return; }
+  });
+
+  /* Dose calculator — teaching aid, ceilings only */
+  root.addEventListener('input', e => {
+    const r = e.target.closest('[data-calc-range]');
+    if (!r) return;
+    const g = r.closest('[data-ix="calc"]');
+    const kg = Number(r.value);
+    const cap = (mgPerKg, ceiling) => Math.min(kg * mgPerKg, ceiling);
+    const lido = cap(4.5, 300), lidoEpi = cap(7, 500), coke = kg * 3;
+    const set = (sel, txt) => { const el = g.querySelector(sel); if (el) el.textContent = txt; };
+    set('[data-calc-w]', kg);
+    set('[data-calc-lido]', Math.round(lido) + ' mg');
+    set('[data-calc-lidoml]', (lido / 40).toFixed(1));
+    set('[data-calc-lidoepi]', Math.round(lidoEpi) + ' mg');
+    set('[data-calc-lidoepiml]', (lidoEpi / 10).toFixed(0));
+    set('[data-calc-coke]', Math.round(coke) + ' mg');
+    set('[data-calc-cokeml]', (coke / 100).toFixed(1));
+  });
+}
+wireInteractions(stage);
+
+/* ===========================================
+   5. EDITOR
+   Left: slide list (drag to re-order). Middle: the real slide,
+   with every text node click-to-edit. Right: inspector + deck settings.
+   =========================================== */
+const editStage = document.getElementById('editStage');
+wireInteractions(editStage);
+
+/* Which elements accept inline editing: text-bearing leaves only,
+   so slide structure and interactive controls cannot be broken. */
+const INLINE_OK = /^(B|I|EM|STRONG|SMALL|BR|U|SUP|SUB|A)$/;
+function isEditable(el) {
+  if (el.closest('button') || el.hasAttribute('data-deck')) return false;
+  if (el.hasAttribute('data-calc-w') || el.id === 'x') return false;
+  if (/^(BUTTON|INPUT|SVG|PATH|TEXT|IMG)$/.test(el.tagName)) return false;
+  if (el.closest('svg')) return false;
+  if (!el.textContent.trim()) return false;
+  return [...el.children].every(c => INLINE_OK.test(c.tagName));
+}
+function makeEditable(root) {
+  root.querySelectorAll('h1,h2,h3,h4,h5,p,li,td,th,span,div,figcaption').forEach(el => {
+    if (isEditable(el)) { el.setAttribute('contenteditable', 'true'); el.setAttribute('spellcheck', 'false'); }
+  });
+  /* Control labels: double-click to rename, so buttons stay clickable */
+  root.querySelectorAll('button').forEach(b => {
+    b.addEventListener('dblclick', ev => {
+      const lbl = ev.target.closest('span') || b;
+      lbl.setAttribute('contenteditable', 'true');
+      lbl.focus();
+      lbl.addEventListener('blur', () => { lbl.removeAttribute('contenteditable'); pullFromStage(); }, { once: true });
+    });
+  });
+}
+
+/* Reset transient component state before saving, so a saved slide
+   always reopens in its initial configuration. */
+function sanitize(html) {
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  d.querySelectorAll('[contenteditable]').forEach(el => { el.removeAttribute('contenteditable'); el.removeAttribute('spellcheck'); });
+  d.querySelectorAll('[data-ix]').forEach(g => {
+    ['data-tab', 'data-step', 'data-hot'].forEach(attr => {
+      const btns = g.querySelectorAll('[' + attr + ']');
+      btns.forEach((b, i) => i === 0 ? b.setAttribute('aria-selected', 'true') : b.removeAttribute('aria-selected'));
+    });
+    g.querySelectorAll('.ix-panel').forEach((p, i) => p.classList.toggle('on', p.getAttribute('data-panel') === '0'));
+    g.querySelectorAll('[data-filter]').forEach((c, i) => c.setAttribute('aria-pressed', String(i === 0)));
+    g.querySelectorAll('.mx-row').forEach(r => r.classList.remove('dim', 'hit'));
+  });
+  d.querySelectorAll('.quiz-opt').forEach(o => o.classList.remove('right', 'wrong'));
+  d.querySelectorAll('.quiz-fb').forEach(f => f.classList.remove('on'));
+  d.querySelectorAll('.ck').forEach(c => c.classList.remove('on'));
+  d.querySelectorAll('.ix-reveal').forEach(c => c.classList.remove('open'));
+  return d.innerHTML;
+}
+
+let pullTimer = null;
+
+/* Read the live slide back into the model. The stage stamps which slide it
+   is showing, so a pending read always lands on the right slide even if the
+   selection has already moved on. */
+function doPull() {
+  clearTimeout(pullTimer); pullTimer = null;
+  const sec = editStage.querySelector('.slide');
+  if (!sec) return;
+  const idx = Number(editStage.dataset.idx);
+  const s = state.slides[idx];
+  if (!s) return;
+  const body = s.layout === 'cover' ? sec : sec.querySelector('.s-body');
+  if (!body) return;
+  if (s.layout === 'cover') {
+    s.html = sanitize(body.innerHTML);
+  } else {
+    const main = [...body.children].filter(c => !c.classList.contains('shead'));
+    s.html = sanitize(main.map(c => c.outerHTML).join(''));
+    const h = body.querySelector('.shead .stitle');
+    const k = body.querySelector('.shead .kicker');
+    if (h) s.title = h.innerHTML.trim();
+    if (k) s.kicker = k.innerHTML.trim();
+    if (idx === editIdx) {
+      if (h) document.getElementById('fTitle').value = stripTags(s.title);
+      if (k) document.getElementById('fKicker').value = stripTags(s.kicker);
+    }
+  }
+  save();
+  renderList();
+}
+function pullFromStage() { clearTimeout(pullTimer); pullTimer = setTimeout(doPull, 380); }
+/* Commit any pending edit before anything re-renders or re-orders the deck. */
+function flushPull() { if (pullTimer) doPull(); }
+
+function renderEditSlide() {
+  flushPull();
+  const s = state.slides[editIdx];
+  editStage.innerHTML = '';
+  editStage.dataset.idx = String(editIdx);
+  const sec = buildSlide(s, editIdx, state.slides.length);
+  sec.classList.add('active', 'visible');
+  editStage.appendChild(sec);
+  makeEditable(sec);
+  sec.addEventListener('input', pullFromStage);
+  sec.addEventListener('focusout', flushPull);
+  fitAll();
+  document.getElementById('edIdx').textContent = (editIdx + 1) + ' / ' + state.slides.length;
+  document.getElementById('fKicker').value = stripTags(s.kicker || '');
+  document.getElementById('fTitle').value = stripTags(s.title || '');
+  document.getElementById('fNotes').value = s.notes || '';
+}
+
+function renderList() {
+  const list = document.getElementById('edList');
+  list.innerHTML = '';
+  state.slides.forEach((s, i) => {
+    const b = document.createElement('div');
+    b.className = 'ed-item' + (i === editIdx ? ' cur' : '');
+    b.draggable = true;
+    b.dataset.i = i;
+    b.innerHTML = `<span class="n">${romanish(i)}</span><span><span class="t">${escapeHtml(stripTags(s.title || 'Untitled'))}</span>${s.kicker ? `<span class="k">${escapeHtml(stripTags(s.kicker))}</span>` : ''}</span>`;
+    b.addEventListener('click', () => { flushPull(); editIdx = i; renderList(); renderEditSlide(); });
+    b.addEventListener('dragstart', ev => { ev.dataTransfer.setData('text/plain', i); b.classList.add('drag'); });
+    b.addEventListener('dragend', () => b.classList.remove('drag'));
+    b.addEventListener('dragover', ev => { ev.preventDefault(); b.classList.add('over'); });
+    b.addEventListener('dragleave', () => b.classList.remove('over'));
+    b.addEventListener('drop', ev => {
+      ev.preventDefault(); b.classList.remove('over');
+      flushPull();
+      const from = Number(ev.dataTransfer.getData('text/plain'));
+      if (Number.isNaN(from) || from === i) return;
+      const [moved] = state.slides.splice(from, 1);
+      state.slides.splice(i, 0, moved);
+      editIdx = i;
+      afterStructureChange();
+    });
+    list.appendChild(b);
+  });
+  document.getElementById('edCount').textContent = state.slides.length;
+  const cur = list.querySelector('.ed-item.cur');
+  if (cur) cur.scrollIntoView({ block: 'nearest' });
+}
+
+function afterStructureChange() {
+  save(); renderList(); renderEditSlide(); renderDeck();
+}
+
+/* Inspector bindings */
+const bindField = (id, fn) => document.getElementById(id).addEventListener('input', e => { flushPull(); fn(e.target.value); save(); });
+bindField('fKicker', v => { state.slides[editIdx].kicker = v; renderEditSlide(); renderList(); });
+bindField('fTitle', v => { state.slides[editIdx].title = v; renderEditSlide(); renderList(); });
+bindField('fNotes', v => { state.slides[editIdx].notes = v; });
+bindField('fDeck', v => { state.meta.title = v; renderEditSlide(); renderDeck(); });
+bindField('fAuthor', v => { state.meta.author = v; renderEditSlide(); });
+bindField('fDate', v => { state.meta.date = v; renderEditSlide(); });
+
+document.getElementById('swatches').addEventListener('click', e => {
+  const sw = e.target.closest('[data-accent]');
+  if (!sw) return;
+  state.meta.accent = sw.getAttribute('data-accent');
+  applyAccent(); save();
+});
+function applyAccent() {
+  document.documentElement.setAttribute('data-accent', state.meta.accent || 'vermilion');
+  document.querySelectorAll('#swatches .sw').forEach(s =>
+    s.setAttribute('aria-pressed', String(s.getAttribute('data-accent') === (state.meta.accent || 'vermilion'))));
+}
+
+/* Slide operations */
+document.getElementById('btnAdd').addEventListener('click', () => {
+  flushPull();
+  state.slides.splice(editIdx + 1, 0, {
+    id: 'slide-' + Date.now().toString(36),
+    layout: 'standard',
+    kicker: 'New section',
+    title: 'New slide',
+    notes: '',
+    html: `<div class="s-main"><div class="g2 reveal">
+      <div class="card"><span class="cn">01</span><h4>First point</h4><p>Replace this text by clicking it.</p></div>
+      <div class="card tint"><span class="cn">02</span><h4>Second point</h4><p>Replace this text by clicking it.</p></div>
+    </div></div>`
+  });
+  editIdx += 1;
+  afterStructureChange();
+});
+document.getElementById('btnDup').addEventListener('click', () => {
+  flushPull();
+  const c = clone(state.slides[editIdx]);
+  c.id = c.id + '-copy-' + Date.now().toString(36).slice(-4);
+  state.slides.splice(editIdx + 1, 0, c);
+  editIdx += 1;
+  afterStructureChange();
+});
+document.getElementById('btnDel').addEventListener('click', () => {
+  flushPull();
+  if (state.slides.length === 1) return;
+  if (!confirm('Delete slide ' + (editIdx + 1) + '?')) return;
+  state.slides.splice(editIdx, 1);
+  editIdx = Math.max(0, editIdx - 1);
+  afterStructureChange();
+});
+const move = d => {
+  flushPull();
+  const j = editIdx + d;
+  if (j < 0 || j >= state.slides.length) return;
+  const [m] = state.slides.splice(editIdx, 1);
+  state.slides.splice(j, 0, m);
+  editIdx = j;
+  afterStructureChange();
+};
+document.getElementById('btnUp').addEventListener('click', () => move(-1));
+document.getElementById('btnDown').addEventListener('click', () => move(1));
+
+/* Insert an image into the open slide (embedded, so the file stays standalone) */
+document.getElementById('btnImg').addEventListener('click', () => { flushPull(); document.getElementById('fileImg').click(); });
+document.getElementById('fileImg').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    const s = state.slides[editIdx];
+    const fig = `<div class="reveal" style="margin-top:24px;text-align:center"><img src="${r.result}" alt="" style="max-height:460px;border:1px solid var(--rule);border-radius:2px"></div>`;
+    s.html = s.html.replace(/<\/div>\s*$/, fig + '</div>');
+    afterStructureChange();
+  };
+  r.readAsDataURL(f);
+  e.target.value = '';
+});
+
+/* Export: bake the current content back into a standalone copy.
+   Embedded previews (iframes) block downloads, so say so rather than
+   failing silently — the edits are still safe in this browser. */
+function flash(msg, ms) {
+  const flag = document.getElementById('saveFlag');
+  flag.textContent = msg;
+  flag.classList.add('show');
+  setTimeout(() => { flag.classList.remove('show'); flag.textContent = 'Saved'; }, ms || 1600);
+}
+function download(name, text, type) {
+  try {
+    const blob = new Blob([text], { type: type });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  } catch (e) {}
+  if (window.self !== window.top) flash('Downloads are blocked inside this preview — open the standalone file to export', 5200);
+  else flash('Exported ' + name, 2600);
+}
+document.getElementById('btnExport').addEventListener('click', () => {
+  flushPull();
+  const doc = document.documentElement.cloneNode(true);
+  ['deckStage', 'editStage', 'edList', 'ovGrid'].forEach(id => { const el = doc.querySelector('#' + id); if (el) el.innerHTML = ''; });
+  const holder = doc.querySelector('#userDeck');
+  if (holder) holder.textContent = JSON.stringify(state).replace(/</g, '\\u003c');
+  download(slugify(state.meta.title) + '.html', '<!DOCTYPE html>\n' + doc.outerHTML, 'text/html');
+});
+document.getElementById('btnJson').addEventListener('click', () => {
+  flushPull();
+  download(slugify(state.meta.title) + '.json', JSON.stringify(state, null, 2), 'application/json');
+});
+document.getElementById('btnReset').addEventListener('click', () => {
+  if (!confirm('Discard all edits and restore the original deck?')) return;
+  try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+  state = clone(BASE); current = 0; editIdx = 0;
+  applyAccent(); fillDeckFields(); afterStructureChange();
+});
+function slugify(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'deck'; }
+function fillDeckFields() {
+  document.getElementById('fDeck').value = state.meta.title || '';
+  document.getElementById('fAuthor').value = state.meta.author || '';
+  document.getElementById('fDate').value = state.meta.date || '';
+}
+
+/* ===========================================
+   6. TABS (Present / Edit) + BOOT
+   =========================================== */
+let mode = 'present';
+function setMode(m) {
+  if (m === mode) return;
+  flushPull();
+  mode = m;
+  document.querySelectorAll('[data-mode-btn]').forEach(b => b.setAttribute('aria-selected', String(b.getAttribute('data-mode-btn') === m)));
+  document.getElementById('viewPresent').classList.toggle('on', m === 'present');
+  document.getElementById('viewEdit').classList.toggle('on', m === 'edit');
+  document.getElementById('presentActions').style.display = m === 'present' ? '' : 'none';
+  if (m === 'edit') { editIdx = current; renderList(); renderEditSlide(); }
+  else { renderDeck(); showSlide(editIdx, true); }
+  requestAnimationFrame(fitAll);
+}
+document.querySelectorAll('[data-mode-btn]').forEach(b =>
+  b.addEventListener('click', () => setMode(b.getAttribute('data-mode-btn'))));
+
+applyAccent();
+fillDeckFields();
+renderDeck();
+renderList();
+fitAll();
+document.fonts && document.fonts.ready.then(fitAll);
+})();
+</script>
+</body>
+</html>
