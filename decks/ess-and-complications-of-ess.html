@@ -2333,7 +2333,26 @@ function flash(msg, ms) {
   flag.classList.add('show');
   setTimeout(() => { flag.classList.remove('show'); flag.textContent = 'Saved'; }, ms || 1600);
 }
-function download(name, text, type) {
+async function download(name, text, type) {
+  /* Published on claude.ai: the host mediates saving, and the viewer confirms. */
+  const host = (window.claude && typeof window.claude.use === 'function')
+    ? await window.claude.use('downloads').catch(() => null) : null;
+  if (host) {
+    try {
+      await host.save({ filename: name, data: text });
+      flash('Saved ' + name, 2600);
+      return;
+    } catch (err) {
+      const code = err && err.code;
+      if (code === 'declined') { flash('Save cancelled', 2000); return; }
+      if (code !== 'rejected_extension' && code !== 'extension_not_enabled') {
+        flash('Could not save: ' + ((err && err.message) || code || 'unavailable'), 4200);
+        return;
+      }
+      /* This file type is not saveable here — fall through and try the browser. */
+    }
+  }
+  /* Opened as a local file: ordinary browser download. */
   try {
     const blob = new Blob([text], { type: type });
     const a = document.createElement('a');
@@ -2342,9 +2361,10 @@ function download(name, text, type) {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   } catch (e) {}
-  if (window.self !== window.top) flash('Downloads are blocked inside this preview — open the standalone file to export', 5200);
+  if (window.self !== window.top) flash('This preview cannot save ' + name.split('.').pop().toUpperCase() + ' files — use Export JSON, or open the standalone file', 5600);
   else flash('Exported ' + name, 2600);
 }
+
 document.getElementById('btnExport').addEventListener('click', () => {
   flushPull();
   const doc = document.documentElement.cloneNode(true);
