@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Endoscopic Sinus Surgery &amp; Complications of ESS</title>
+<meta name="description" content="A glassmorphism, figure-rich interactive deck on endoscopic sinus surgery (ESS) technique and its complications.">
+<style>
+/* Fonts are self-hosted (Zodiak + Switzer + JetBrains Mono from Fontshare,
+   Noto Sans Thai for the Thai speaker notes) so the deck works offline. */
+/*__FACES__*/
+
+/*__CSS__*/
+</style>
+</head>
+<body>
+
+<!-- ===========================================================
+     AMBIENT BACKGROUND — aurora blobs + grain, outside the stage
+     =========================================================== -->
+<div class="ambient" aria-hidden="true">
+  <span class="blob b1"></span><span class="blob b2"></span>
+  <span class="blob b3"></span><span class="blob b4"></span>
+  <span class="grain"></span><span class="vignette"></span>
+</div>
+
+<!-- ===========================================================
+     THE FIXED 16:9 STAGE
+     =========================================================== -->
+<div class="deck-viewport" id="viewport">
+  <main class="deck-stage" id="deckStage">
+<!--__SLIDES__-->
+  </main>
+</div>
+
+<!-- ===========================================================
+     CHROME — progress, chapter rail, dock
+     =========================================================== -->
+<div class="progress" id="progress" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
+
+<nav class="rail" id="rail" aria-label="Chapters"></nav>
+
+<div class="deck-controls dock glass" role="toolbar" aria-label="Presentation controls">
+  <button class="dk" data-act="prev" title="Previous (←)" aria-label="Previous slide">‹</button>
+  <button class="dk counter" data-act="jump" title="Jump to slide (type a number)"><b id="curN">1</b><em>/</em>__TOTAL__</button>
+  <button class="dk" data-act="next" title="Next (→)" aria-label="Next slide">›</button>
+  <span class="dk-sep"></span>
+  <button class="dk" data-act="grid" title="Overview (G)" aria-label="Slide overview">▦</button>
+  <button class="dk" data-act="search" title="Search (/)" aria-label="Search deck">⌕</button>
+  <button class="dk" data-act="notes" title="Speaker notes (N)" aria-label="Speaker notes">✎</button>
+  <button class="dk" data-act="timer" title="Presenter timer (P)" aria-label="Timer"><span id="timerLabel">00:00</span></button>
+  <span class="dk-sep"></span>
+  <button class="dk" data-act="theme" title="Light / dark (T)" aria-label="Toggle theme">◑</button>
+  <button class="dk" data-act="full" title="Fullscreen (F)" aria-label="Fullscreen">⤢</button>
+  <button class="dk" data-act="help" title="Shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+</div>
+
+<div class="jump-pill glass" id="jumpPill" hidden>Go to slide <b id="jumpBuf"></b></div>
+
+<!-- Inline editing affordance (hover top-left or press E) -->
+<div class="edit-hotzone" id="editHotzone"></div>
+<button class="edit-toggle glass" id="editToggle" title="Edit mode (E)">✏️</button>
+
+<!-- ===========================================================
+     OVERLAYS
+     =========================================================== -->
+<div class="overlay" id="gridOverlay" hidden>
+  <div class="ov-head glass">
+    <h3>Overview</h3>
+    <div class="ov-chips" id="gridChips"></div>
+    <button class="ov-close" data-close title="Close (Esc)">✕</button>
+  </div>
+  <div class="ov-body grid-body" id="gridBody"></div>
+</div>
+
+<div class="overlay" id="searchOverlay" hidden>
+  <div class="ov-head glass">
+    <h3>Search</h3>
+    <input id="searchInput" type="search" placeholder="Search titles, bullets, captions, notes…" autocomplete="off" spellcheck="false">
+    <span class="ov-count" id="searchCount"></span>
+    <button class="ov-close" data-close title="Close (Esc)">✕</button>
+  </div>
+  <div class="ov-body search-body" id="searchBody"></div>
+</div>
+
+<div class="overlay" id="helpOverlay" hidden>
+  <div class="ov-head glass"><h3>Keyboard &amp; gestures</h3><button class="ov-close" data-close title="Close (Esc)">✕</button></div>
+  <div class="ov-body help-body">
+    <div class="help-card glass">
+      <h4>Navigate</h4>
+      <ul>
+        <li><kbd>→</kbd><kbd>Space</kbd><kbd>PgDn</kbd><span>Next slide</span></li>
+        <li><kbd>←</kbd><kbd>PgUp</kbd><span>Previous slide</span></li>
+        <li><kbd>Home</kbd><kbd>End</kbd><span>First / last slide</span></li>
+        <li><kbd>1</kbd>…<kbd>9</kbd><kbd>↵</kbd><span>Jump to slide number</span></li>
+        <li><kbd>swipe</kbd><span>Next / previous on touch</span></li>
+      </ul>
+    </div>
+    <div class="help-card glass">
+      <h4>Explore</h4>
+      <ul>
+        <li><kbd>G</kbd><span>Overview grid</span></li>
+        <li><kbd>/</kbd><kbd>S</kbd><span>Search the whole deck</span></li>
+        <li><kbd>N</kbd><span>Speaker notes drawer</span></li>
+        <li><kbd>click</kbd><span>Open a figure full screen</span></li>
+        <li><kbd>+</kbd><kbd>−</kbd><kbd>drag</kbd><span>Zoom &amp; pan in the lightbox</span></li>
+      </ul>
+    </div>
+    <div class="help-card glass">
+      <h4>Present</h4>
+      <ul>
+        <li><kbd>P</kbd><span>Start / pause timer</span></li>
+        <li><kbd>F</kbd><span>Fullscreen</span></li>
+        <li><kbd>T</kbd><span>Light / dark glass</span></li>
+        <li><kbd>E</kbd><span>Inline edit mode (autosaves)</span></li>
+        <li><kbd>Esc</kbd><span>Close any overlay</span></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<aside class="notes glass" id="notesPanel" hidden>
+  <div class="notes-head">
+    <h4>Speaker notes<span id="notesSlide"></span></h4>
+    <button class="ov-close" data-close title="Close (N)">✕</button>
+  </div>
+  <div class="notes-body" id="notesBody"></div>
+</aside>
+
+<div class="lightbox" id="lightbox" hidden>
+  <div class="lb-stage" id="lbStage"><img id="lbImg" alt=""></div>
+  <div class="lb-bar glass">
+    <button class="dk" id="lbPrev" title="Previous figure">‹</button>
+    <span class="lb-cap" id="lbCap"></span>
+    <button class="dk" id="lbOut" title="Zoom out (−)">−</button>
+    <span class="lb-zoom" id="lbZoom">100%</span>
+    <button class="dk" id="lbIn" title="Zoom in (+)">+</button>
+    <button class="dk" id="lbReset" title="Reset zoom (0)">⟲</button>
+    <button class="dk" id="lbNext" title="Next figure">›</button>
+    <button class="dk" data-close title="Close (Esc)">✕</button>
+  </div>
+</div>
+
+<div class="toast glass" id="toast" hidden></div>
+
+<script>
+window.DECK = /*__DATA__*/;
+/*__JS__*/
+</script>
+</body>
+</html>
