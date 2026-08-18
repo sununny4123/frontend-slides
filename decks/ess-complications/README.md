@@ -14,6 +14,28 @@ Two builds, same deck:
 
 No build step, no server, no dependencies.
 
+## The design
+
+- **Chapter identity.** Each of the 15 chapters carries its own accent hue,
+  which drives the aurora background, the header tab, rules, chips, the
+  progress bar and the chapter rail.
+- **Header.** A chapter tab, a progress bar showing where the slide sits
+  *within* its chapter, and the slide number. Procedure steps ("3. Middle
+  Meatal Antrostomy") get the numeral promoted to a badge beside the title,
+  with the digits kept in the heading text for search and screen readers.
+- **Two tiers of glass.** Prose panels are tinted and carry an accent spine;
+  figure plates are lighter, so photographs sit forward of the text.
+- **Section beats.** Moving into a new chapter blurs the deck for a moment
+  behind a chapter card — the reading rhythm the original PowerPoint lacked.
+  It only fires on sequential navigation, never on a jump.
+- **Statement slides.** Short text-only slides hug their content and place a
+  large outlined chapter numeral in the space they leave, instead of
+  stretching a half-empty sheet across the stage.
+- **Contents on the cover.** All 15 chapters with their slide ranges, each
+  row clickable.
+- Direction-aware slide transitions, staggered reveals, and a faint plotting
+  grid behind the glass. All motion respects `prefers-reduced-motion`.
+
 ## What's in it
 
 | | |

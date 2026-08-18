@@ -21,6 +21,7 @@
     var state = {
         i: 0,
         editing: false,
+        ch: -1,
         timer: { on: false, sec: 0, id: null },
         jumpBuf: ''
     };
@@ -119,14 +120,29 @@
 
     function show(i, opts) {
         opts = opts || {};
+        var from = state.i;
         state.i = clamp(i, 0, total - 1);
+        var dir = state.i > from ? 'enter-fwd' : (state.i < from ? 'enter-back' : '');
+        /* the chapter card is a reading beat — it should not fire on a jump */
+        var seq = Math.abs(state.i - from) === 1;
         slides.forEach(function (s, k) {
             var on = k === state.i;
             s.classList.toggle('active', on);
             s.classList.toggle('visible', on);
+            s.classList.remove('enter-fwd', 'enter-back');
+            if (on && dir && !opts.silent) {
+                /* restart the entrance animation */
+                void s.offsetWidth;
+                s.classList.add(dir);
+            }
         });
         var n = state.i + 1;
-        var ch = DATA.chapters[chapterOf(n)];
+        var chIdx = chapterOf(n);
+        var ch = DATA.chapters[chIdx];
+
+        /* a short title card whenever the deck crosses into a new chapter */
+        if (!opts.silent && seq && chIdx !== state.ch) chapterBeat(chIdx);
+        state.ch = chIdx;
 
         /* the ambient aurora inherits the chapter accent */
         document.body.style.setProperty('--accent', ch.c);
@@ -157,6 +173,17 @@
             for (; i < end; i++) imgs[i].loading = 'eager';
             if (i < imgs.length) setTimeout(step, 120);
         })();
+    }
+
+    function chapterBeat(idx) {
+        var c = DATA.chapters[idx];
+        var el = $('#chBeat');
+        $('#cbNo').textContent = String(idx + 1).padStart(2, '0');
+        $('#cbName').textContent = c.t;
+        $('#cbRange').textContent = 'slides ' + c.a + '–' + c.b;
+        el.classList.add('on');
+        clearTimeout(state._beat);
+        state._beat = setTimeout(function () { el.classList.remove('on'); }, 1150);
     }
 
     function preload(idx) {
@@ -483,7 +510,7 @@
        edited deck saved back out as a standalone HTML file.
        ------------------------------------------------------- */
     var EDIT_SEL = [
-        '.s-title', '.eyebrow', '.b span', '.fig-cap', '.chip', '.src',
+        '.s-title', '.ch-tab', '.b span', '.fig-cap', '.chip', '.src',
         '.cover-kicker', '.cover-title', '.cover-by', '.cover-meta span',
         '.closing-title', '.closing-sub', '.tr-title', '.tr-note', '.tg h4',
         '.tbl th', '.tbl td'
@@ -790,6 +817,19 @@
             if (e.key !== 'Enter' && e.key !== ' ') return;
             var t = e.target.closest && e.target.closest('.gcard, .sres');
             if (t) { e.preventDefault(); t.click(); }
+        });
+
+        /* the cover's contents list jumps to a chapter */
+        stage.addEventListener('click', function (e) {
+            var go = e.target.closest('[data-go]');
+            if (go && !state.editing) { show(+go.dataset.go - 1); }
+        });
+        stage.addEventListener('keydown', function (e) {
+            var go = e.target.closest && e.target.closest('[data-go]');
+            if (go && (e.key === 'Enter' || e.key === ' ') && !state.editing) {
+                e.preventDefault();
+                show(+go.dataset.go - 1);
+            }
         });
 
         /* figures → lightbox */

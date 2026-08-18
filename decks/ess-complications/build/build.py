@@ -292,6 +292,7 @@ def figure_html(f, idx, n, cols=2):
   <div class="fig-media" style="--ratio:{ratio:.4f}">
     <img src="assets/img/{f['file']}" data-file="{f['file']}" width="{f['iw']}" height="{f['ih']}" loading="lazy" decoding="async" alt="{alt}">
     <span class="fig-zoom" aria-hidden="true">⤢</span>
+    <span class="fig-no" aria-hidden="true">{idx + 1:02d}</span>
   </div>
   {chiprow}{caps}
 </figure>"""
@@ -367,13 +368,38 @@ def slide_html(n, c, layout, ch_idx, total):
         )
     srcbar = f'<div class="sources">{src}</div>' if src else "<div></div>"
 
+    # a leading "3." in the title is a procedure step — promote it to a badge
+    m = re.match(r"^(\d+)\.\s+(.*)$", c["title"])
+    step = m.group(1) if m else ""
+    ttl = m.group(2) if m else c["title"]
+    within = n - ch[0] + 1
+    span = ch[1] - ch[0] + 1
+    pct = round(within / span * 100)
+
     head = f"""<header class="s-head reveal">
-      <div class="eyebrow"><i class="dot"></i>{esc(ch[2])}<em>/</em>{n:02d}</div>
-      <h2 class="s-title">{esc(c['title'])}</h2>
+      <div class="eyebrow">
+        <span class="ch-tab"><i class="dot"></i>{esc(ch[2])}</span>
+        <span class="ch-prog" title="slide {within} of {span} in this chapter">
+          <span class="ch-prog-fill" style="width:{pct}%"></span>
+        </span>
+        <span class="ch-count">{within}<em>/</em>{span}</span>
+        <span class="s-no">{n:02d}</span>
+      </div>
+      <div class="title-row">
+        {f'<span class="step-badge" aria-hidden="true">{step}</span>' if step else ''}
+        <h2 class="s-title">{f'<span class="step-read">{step}. </span>' if step else ''}{esc(ttl)}</h2>
+      </div>
       <div class="rule"></div>
     </header>"""
 
     if layout == "cover":
+        toc = "".join(
+            f'<li class="ctoc-row" data-go="{a}" style="--c:{c1}" tabindex="0" role="button">'
+            f'<span class="ctoc-no">{i + 1:02d}</span>'
+            f'<span class="ctoc-name">{esc(t)}</span>'
+            f'<span class="ctoc-range">{a}<em>–</em>{bnum}</span></li>'
+            for i, (a, bnum, t, _s, c1, _c2) in enumerate(meta.CHAPTERS)
+        )
         return f"""<section class="slide s-cover" data-n="{n}" data-ch="{ch_idx}" style="--accent:{accent};--accent2:{accent2}">
   <div class="slide-inner cover-inner">
     <div class="cover-glass glass reveal">
@@ -382,11 +408,14 @@ def slide_html(n, c, layout, ch_idx, total):
       <div class="cover-rule"></div>
       <p class="cover-by">Nichana S.</p>
       <div class="cover-meta">
-        <span>{total} slides</span><span>15 chapters</span><span>195 figures</span>
+        <span>{total} slides</span><span>{len(meta.CHAPTERS)} chapters</span><span>195 figures</span>
       </div>
       <p class="cover-hint">Press <kbd>&rarr;</kbd> to begin &middot; <kbd>?</kbd> for shortcuts</p>
     </div>
-    <div class="cover-figs figbox" style="--cols:{cols}">{figs}</div>
+    <aside class="cover-toc glass reveal">
+      <h2 class="ctoc-head">Contents</h2>
+      <ol class="ctoc-list">{toc}</ol>
+    </aside>
   </div>
   <footer class="s-foot">{srcbar}</footer>
 </section>"""
@@ -428,14 +457,17 @@ def slide_html(n, c, layout, ch_idx, total):
 </section>"""
 
     if layout == "text":
-        wide = "two-col" if len(re.sub(r"<[^>]+>", "", body)) > 780 else ""
+        plain = len(re.sub(r"<[^>]+>", "", body))
+        wide = "two-col" if plain > 780 else ""
+        stmt = " stmt" if plain < 560 else ""
         return f"""<section class="slide" data-n="{n}" data-ch="{ch_idx}" style="--accent:{accent};--accent2:{accent2}">
-  <div class="slide-inner l-text">
+  <div class="slide-inner l-text{stmt}">
     {head}
     <div class="s-body reveal">
       <div class="panel glass text-panel {wide}"><div class="panel-body"><div class="fit">{body}</div></div></div>
     </div>
   </div>
+  <div class="ch-mark" aria-hidden="true">{ch_idx + 1:02d}</div>
   <footer class="s-foot">{srcbar}</footer>
 </section>"""
 
