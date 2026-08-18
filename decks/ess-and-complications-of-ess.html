@@ -78,14 +78,14 @@ img, video, canvas, svg { max-width: 100%; max-height: 100%; }
     --rule-soft:  rgba(24, 32, 42, 0.10);
 
     /* Accents (swappable from the Edit tab) */
-    --accent:     #B23A16;   /* vermilion — surgical marker */
-    --accent-2:   #1C6560;   /* endoscope teal */
+    --accent:     #17605C;   /* surgical drape teal — the colour of the field */
+    --accent-2:   #B23A16;   /* marker vermilion */
     --accent-3:   #A8791F;   /* ochre — caution */
     --accent-ink: #FFFFFF;
 
     /* Semantic */
     --danger:     #A32617;
-    --safe:       #1C6560;
+    --safe:       #17605C;
 
     /* App chrome (outside the slide stage) */
     --chrome:     #12181F;
@@ -118,7 +118,7 @@ img, video, canvas, svg { max-width: 100%; max-height: 100%; }
     --ease: cubic-bezier(0.16, 1, 0.3, 1);
     --dur: 0.62s;
 }
-:root[data-accent="teal"]  { --accent: #1C6560; --accent-2: #B23A16; --accent-3: #A8791F; }
+:root[data-accent="vermilion2"] { --accent: #B23A16; --accent-2: #17605C; --accent-3: #A8791F; }
 :root[data-accent="ink"]   { --accent: #2B3947; --accent-2: #6E7883; --accent-3: #A8791F; }
 :root[data-accent="ochre"] { --accent: #A8791F; --accent-2: #1C6560; --accent-3: #B23A16; }
 
@@ -315,9 +315,9 @@ body {
 .ed-danger:hover { background: #3A211C; border-color: #7A3A2C; color: #FFD9CE; }
 
 /* Editable affordances inside the edit preview */
-.edit-stage [contenteditable="true"] { outline: 1px dashed rgba(178, 58, 22, .38); outline-offset: 3px; border-radius: 2px; cursor: text; }
-.edit-stage [contenteditable="true"]:hover { background: rgba(178, 58, 22, .07); }
-.edit-stage [contenteditable="true"]:focus { outline: 2px solid var(--accent); background: rgba(178, 58, 22, .05); }
+.edit-stage [contenteditable="true"] { outline: 1px dashed rgba(23, 96, 92, .42); outline-offset: 3px; border-radius: 2px; cursor: text; }
+.edit-stage [contenteditable="true"]:hover { background: rgba(23, 96, 92, .08); }
+.edit-stage [contenteditable="true"]:focus { outline: 2px solid var(--accent); background: rgba(23, 96, 92, .06); }
 
 /* ===========================================
    6. SLIDE DESIGN SYSTEM
@@ -363,10 +363,9 @@ body {
 .stitle { font-family: var(--font-display); font-size: var(--t-h2); font-weight: 500; line-height: 1.06; letter-spacing: -.01em; }
 .stitle em { font-style: italic; color: var(--accent); }
 .ssub { font-size: 24px; color: var(--ink-2); margin-top: 12px; max-width: 1300px; line-height: 1.42; }
-/* Static slides centre in the plate; interactive slides anchor to the top so
-   their tabs and steppers never jump when a taller panel is opened. */
+/* Content sits centred in the plate. Interactive panels carry a minimum
+   height (below) so tabs and steppers barely move as panels are switched. */
 .s-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; justify-content: center; }
-.s-main[data-ix] { justify-content: flex-start; }
 
 /* Cover slide */
 .cover { padding: 0; }
@@ -397,8 +396,8 @@ body {
     background: var(--paper-2); border: 1px solid var(--rule); border-radius: 2px;
     padding: 26px 28px; position: relative;
 }
-.card.tint { background: rgba(178,58,22,.06); border-color: rgba(178,58,22,.28); }
-.card.tint2 { background: rgba(28,101,96,.07); border-color: rgba(28,101,96,.28); }
+.card.tint { background: rgba(23,96,92,.07); border-color: rgba(23,96,92,.30); }
+.card.tint2 { background: rgba(178,58,22,.06); border-color: rgba(178,58,22,.26); }
 .card.plain { background: transparent; }
 .card .cn {
     font-family: var(--font-mono); font-size: 13px; letter-spacing: .18em;
@@ -437,8 +436,8 @@ ol.num > li::before {
     text-transform: uppercase; padding: 5px 11px; border: 1px solid var(--rule);
     border-radius: 2px; color: var(--ink-2); background: rgba(255,255,255,.35);
 }
-.tag.hot { color: var(--accent); border-color: rgba(178,58,22,.4); background: rgba(178,58,22,.08); }
-.tag.cool { color: var(--accent-2); border-color: rgba(28,101,96,.4); background: rgba(28,101,96,.08); }
+.tag.hot { color: var(--accent); border-color: rgba(23,96,92,.4); background: rgba(23,96,92,.08); }
+.tag.cool { color: var(--accent-2); border-color: rgba(178,58,22,.4); background: rgba(178,58,22,.08); }
 .statline { display: flex; gap: 54px; }
 .stat .v { font-family: var(--font-display); font-size: 76px; line-height: 1; color: var(--accent); }
 .stat .l { font-family: var(--font-mono); font-size: 14px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); margin-top: 8px; }
@@ -472,17 +471,10 @@ table.plate td.key { color: var(--ink); font-weight: 600; }
 .ix-tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .ix-panel { display: none; animation: panelIn .4s var(--ease); }
 .ix-panel.on { display: block; }
-/* Panels fill the remaining plate, so switching tabs never makes the
-   slide visibly grow and shrink, and cards keep a common baseline. */
-.s-main[data-ix] > .ix-panels { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.ix-panels > .ix-panel.on { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-.ix-panels > .ix-panel.on > .g2,
-.ix-panels > .ix-panel.on > .g3,
-.ix-panels > .ix-panel.on > .g-32,
-.ix-panels > .ix-panel.on > .g-23 { flex: 1 1 auto; align-content: stretch; }
-.ix-panel > .g2, .ix-panel > .g3, .ix-panel > .g-32, .ix-panel > .g-23 { min-height: 300px; }
-.ix-panels > .ix-panel > .g2, .ix-panels > .ix-panel > .g3,
-.ix-panels > .ix-panel > .g-32, .ix-panels > .ix-panel > .g-23 { min-height: 0; }
+/* Panels keep a steady minimum block, so switching tabs does not make the
+   slide jump; leftover space falls at the foot of the plate. */
+.ix-panel > .g2, .ix-panel > .g3, .ix-panel > .g-32, .ix-panel > .g-23 { min-height: 340px; }
+
 @keyframes panelIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
 /* -- Stepper (timeline / operative sequence) -- */
@@ -527,7 +519,7 @@ table.plate td.key { color: var(--ink); font-weight: 600; }
 .hot-g { cursor: pointer; }
 .hot-g circle { fill: var(--paper); stroke: var(--accent); stroke-width: 2; transition: fill .22s var(--ease); }
 .hot-g text { fill: var(--accent); font-family: var(--font-mono); font-size: 15px; pointer-events: none; }
-.hot-g:hover circle { fill: rgba(178, 58, 22, .18); }
+.hot-g:hover circle { fill: rgba(23, 96, 92, .18); }
 .hot-g[aria-selected="true"] circle { fill: var(--accent); }
 .hot-g[aria-selected="true"] text { fill: #fff; }
 .hot-g .halo { fill: none; stroke: var(--accent); opacity: .35; animation: ping 2.8s infinite; }
@@ -553,8 +545,8 @@ tr.mx-row.hit td.key { color: var(--accent); }
 .sev.minor { background: var(--accent-3); }
 
 /* -- Quiz -- */
-.quiz-q { font-family: var(--font-display); font-size: 33px; line-height: 1.24; margin-bottom: 20px; }
-.quiz-opts { display: flex; flex-direction: column; gap: 12px; }
+.quiz-q { font-family: var(--font-display); font-size: 33px; line-height: 1.24; margin-bottom: 20px; max-width: 1280px; }
+.quiz-opts { display: flex; flex-direction: column; gap: 12px; max-width: 1280px; }
 .quiz-opt {
     display: flex; gap: 16px; align-items: flex-start; text-align: left; width: 100%;
     padding: 16px 20px; border: 1px solid var(--rule); border-radius: 2px;
@@ -563,10 +555,10 @@ tr.mx-row.hit td.key { color: var(--accent); }
 }
 .quiz-opt:hover { border-color: var(--accent); }
 .quiz-opt .ltr { font-family: var(--font-mono); font-size: 15px; color: var(--ink-3); }
-.quiz-opt.right { border-color: var(--safe); background: rgba(28,101,96,.12); color: var(--ink); }
+.quiz-opt.right { border-color: var(--safe); background: rgba(23,96,92,.14); color: var(--ink); }
 .quiz-opt.right .ltr { color: var(--safe); }
 .quiz-opt.wrong { border-color: var(--danger); background: rgba(163,38,23,.1); }
-.quiz-fb { margin-top: 20px; font-size: 22px; line-height: 1.45; color: var(--ink); display: none; }
+.quiz-fb { margin-top: 20px; font-size: 22px; line-height: 1.45; color: var(--ink); display: none; max-width: 1280px; }
 .quiz-fb.on { display: block; animation: panelIn .35s var(--ease); }
 .quiz-fb b { color: var(--accent-2); }
 
@@ -577,7 +569,7 @@ tr.mx-row.hit td.key { color: var(--accent); }
 .ck:hover { border-color: var(--accent); }
 .ck .box { flex: 0 0 auto; width: 22px; height: 22px; border: 1.5px solid var(--ink-3); border-radius: 2px; margin-top: 3px; display: grid; place-items: center; transition: all .2s; }
 .ck .box::after { content: ''; width: 11px; height: 6px; border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(-45deg) scale(0); transition: transform .22s var(--ease); }
-.ck.on { background: rgba(178,58,22,.07); border-color: rgba(178,58,22,.4); }
+.ck.on { background: rgba(23,96,92,.08); border-color: rgba(23,96,92,.42); }
 .ck.on .box { background: var(--accent); border-color: var(--accent); }
 .ck.on .box::after { transform: rotate(-45deg) scale(1); }
 .ck .cktx { font-size: 21px; line-height: 1.4; color: var(--ink-2); }
@@ -603,7 +595,7 @@ tr.mx-row.hit td.key { color: var(--accent); }
     background: none; border: 0; border-bottom: 1px solid var(--rule-soft);
     padding: 13px 6px; cursor: pointer; font-family: var(--font-body); transition: all .2s;
 }
-.jmp:hover { background: rgba(178,58,22,.07); padding-left: 14px; }
+.jmp:hover { background: rgba(23,96,92,.08); padding-left: 14px; }
 .jmp .jn { font-family: var(--font-mono); font-size: 14px; color: var(--accent); letter-spacing: .1em; }
 .jmp .jt { font-size: 23px; color: var(--ink); flex: 1; }
 .jmp .jp { font-family: var(--font-mono); font-size: 13px; color: var(--ink-3); }
@@ -755,8 +747,8 @@ tr.mx-row.hit td.key { color: var(--accent); }
       <div class="field">
         <label>Accent</label>
         <div class="swatches" id="swatches">
-          <button class="sw" data-accent="vermilion" style="background:#B23A16" title="Vermilion" aria-pressed="true"></button>
-          <button class="sw" data-accent="teal" style="background:#1C6560" title="Endoscope teal" aria-pressed="false"></button>
+          <button class="sw" data-accent="drape" style="background:#17605C" title="Drape teal" aria-pressed="true"></button>
+          <button class="sw" data-accent="vermilion2" style="background:#B23A16" title="Marker vermilion" aria-pressed="false"></button>
           <button class="sw" data-accent="ink" style="background:#2B3947" title="Ink" aria-pressed="false"></button>
           <button class="sw" data-accent="ochre" style="background:#A8791F" title="Ochre" aria-pressed="false"></button>
         </div>
@@ -784,7 +776,7 @@ const DECK_DEFAULT = {
     author: 'Nichana S.',
     date: '16 September 2024',
     venue: 'Otolaryngology — Head & Neck Surgery',
-    accent: 'vermilion'
+    accent: 'drape'
   },
   slides: [
 
@@ -2266,7 +2258,7 @@ document.getElementById('swatches').addEventListener('click', e => {
   applyAccent(); save();
 });
 function applyAccent() {
-  document.documentElement.setAttribute('data-accent', state.meta.accent || 'vermilion');
+  document.documentElement.setAttribute('data-accent', state.meta.accent || 'drape');
   document.querySelectorAll('#swatches .sw').forEach(s =>
     s.setAttribute('aria-pressed', String(s.getAttribute('data-accent') === (state.meta.accent || 'vermilion'))));
 }
