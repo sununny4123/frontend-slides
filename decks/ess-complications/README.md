@@ -4,8 +4,15 @@ A glassmorphism redesign of the 111-slide lecture deck
 *"ESS and complications from ESS"* (Nichana S.), rebuilt as a single
 self-contained, offline-capable HTML presentation.
 
-Open `index.html` in any modern browser. No build step, no server, no
-dependencies — fonts and images are local files under `assets/`.
+Two builds, same deck:
+
+- **`ess-complications-standalone.html`** (12.9 MB) — one file, every image and
+  font inlined. Download it, double-click it, works offline with nothing else
+  alongside. Use this one to share or hand around.
+- **`index.html`** (428 KB) — the same deck reading its images from `assets/`.
+  Lighter to load and to diff; keep the folder together.
+
+No build step, no server, no dependencies.
 
 ## What's in it
 
@@ -39,7 +46,7 @@ next to it.
 | `P` | presenter timer (double-click the dock button to reset) |
 | `T` | light / dark glass |
 | `F` | fullscreen |
-| `E` | inline edit mode — click any text, autosaves to localStorage |
+| `E` | real-time edit mode (see below) |
 | `?` | shortcut reference |
 | `Esc` | close any overlay |
 
@@ -50,6 +57,25 @@ Touch: swipe left/right to navigate. Mouse wheel also advances slides.
 The URL carries the slide (`#/42`), and the last position, theme and edits
 are restored on reload.
 
+## Real-time editing
+
+Press `E` (or the ✎+ button in the dock) and the deck becomes directly
+editable — no export, no round trip:
+
+- Click any title, bullet, caption, chip, table cell or citation and type. The
+  slide re-lays out **as you type**: the prose auto-fit and the figure-grid
+  solver re-run, so nothing ever overflows the 16:9 stage.
+- `Enter` in a bullet adds a new one below; `Backspace` in an empty bullet
+  removes it.
+- Hover any bullet, figure, chip, citation or table row and click the red ✕ to
+  delete it.
+- Every change is saved to the browser immediately, so a reload picks up where
+  you left off.
+- **Save HTML** writes the edited deck out as a fresh standalone file
+  (`ess-deck-edited.html`) — fully self-contained and itself editable, so you
+  can keep editing the copy and save again.
+- **Reset** discards every edit and restores the original deck.
+
 Printing (`Ctrl/Cmd-P`) lays the deck out one slide per page for PDF export.
 
 ## How it was built
@@ -59,8 +85,12 @@ content fix:
 
 ```
 cd build
-python3 build.py          # needs deck.json + imgmap.json, both committed here
+python3 build.py          # writes index.html AND the standalone single file
 ```
+
+Both outputs come from the same source; the standalone build inlines
+`assets/` as data URIs, emitting each image once even when several slides
+share it.
 
 | File | Role |
 | --- | --- |

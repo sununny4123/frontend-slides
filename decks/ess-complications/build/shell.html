@@ -50,6 +50,7 @@
   <button class="dk" data-act="notes" title="Speaker notes (N)" aria-label="Speaker notes">✎</button>
   <button class="dk" data-act="timer" title="Presenter timer (P)" aria-label="Timer"><span id="timerLabel">00:00</span></button>
   <span class="dk-sep"></span>
+  <button class="dk" data-act="edit" title="Edit mode (E)" aria-label="Edit mode">✎+</button>
   <button class="dk" data-act="theme" title="Light / dark (T)" aria-label="Toggle theme">◑</button>
   <button class="dk" data-act="full" title="Fullscreen (F)" aria-label="Fullscreen">⤢</button>
   <button class="dk" data-act="help" title="Shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
@@ -60,6 +61,18 @@
 <!-- Inline editing affordance (hover top-left or press E) -->
 <div class="edit-hotzone" id="editHotzone"></div>
 <button class="edit-toggle glass" id="editToggle" title="Edit mode (E)">✏️</button>
+
+<!-- Real-time editing bar -->
+<div class="edit-bar glass" id="editBar" hidden>
+  <span class="eb-dot"></span>
+  <b>Editing</b>
+  <span class="eb-hint">click any text · <kbd>Enter</kbd> new bullet · <kbd>⌫</kbd> on empty removes · hover a block for ✕</span>
+  <button class="eb-btn eb-primary" id="editSave" title="Download this deck with your edits">Save HTML</button>
+  <button class="eb-btn" id="editReset" title="Discard all edits">Reset</button>
+  <button class="eb-btn" id="editDone" title="Leave edit mode (Esc)">Done</button>
+</div>
+
+<button class="kill-btn" id="killBtn" hidden title="Remove this block">✕</button>
 
 <!-- ===========================================================
      OVERLAYS
@@ -112,7 +125,9 @@
         <li><kbd>P</kbd><span>Start / pause timer</span></li>
         <li><kbd>F</kbd><span>Fullscreen</span></li>
         <li><kbd>T</kbd><span>Light / dark glass</span></li>
-        <li><kbd>E</kbd><span>Inline edit mode (autosaves)</span></li>
+        <li><kbd>E</kbd><span>Real-time edit mode</span></li>
+        <li><kbd>Enter</kbd><kbd>⌫</kbd><span>Add / remove a bullet while editing</span></li>
+        <li><kbd>Save HTML</kbd><span>Download the deck with your edits</span></li>
         <li><kbd>Esc</kbd><span>Close any overlay</span></li>
       </ul>
     </div>
@@ -143,8 +158,8 @@
 
 <div class="toast glass" id="toast" hidden></div>
 
+<script id="deckData">window.DECK = /*__DATA__*/;</script>
 <script>
-window.DECK = /*__DATA__*/;
 /*__JS__*/
 </script>
 </body>

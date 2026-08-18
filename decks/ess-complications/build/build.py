@@ -288,9 +288,9 @@ def figure_html(f, idx, n, cols=2):
     chips = "".join(f'<span class="chip chip-annot">{esc(a)}</span>' for a in f["annots"])
     chiprow = f'<div class="fig-chips">{chips}</div>' if chips else ""
     alt = esc((f["caps"] + f["annots"] + ["Figure"])[0])[:140]
-    return f"""<figure class="fig glass {wide}" data-slide="{n}" data-fig="{idx}" data-ratio="{ratio:.3f}" data-src="assets/img/{f['file']}" tabindex="0">
+    return f"""<figure class="fig glass {wide}" data-slide="{n}" data-fig="{idx}" data-ratio="{ratio:.3f}" tabindex="0">
   <div class="fig-media" style="--ratio:{ratio:.4f}">
-    <img src="assets/img/{f['file']}" width="{f['iw']}" height="{f['ih']}" loading="lazy" decoding="async" alt="{alt}">
+    <img src="assets/img/{f['file']}" data-file="{f['file']}" width="{f['iw']}" height="{f['ih']}" loading="lazy" decoding="async" alt="{alt}">
     <span class="fig-zoom" aria-hidden="true">⤢</span>
   </div>
   {chiprow}{caps}
@@ -456,6 +456,41 @@ def slide_html(n, c, layout, ch_idx, total):
 
 # --- main -----------------------------------------------------------------
 
+def inline_assets(html_text):
+    """Fold every local asset into the document as a data: URI."""
+    import base64
+    import mimetypes
+
+    cache = {}
+
+    def data_uri(rel):
+        if rel in cache:
+            return cache[rel]
+        path = os.path.join(OUT, rel)
+        mime = mimetypes.guess_type(path)[0] or (
+            "font/woff2" if rel.endswith(".woff2") else "application/octet-stream"
+        )
+        with open(path, "rb") as fh:
+            uri = "data:%s;base64,%s" % (mime, base64.b64encode(fh.read()).decode("ascii"))
+        cache[rel] = uri
+        return uri
+
+    seen = set()
+
+    def sub(m):
+        rel = m.group(2)
+        if rel in seen:
+            # emit the bytes once; a boot script points the repeats at the original
+            return 'data-dup="%s"' % os.path.basename(rel)
+        seen.add(rel)
+        return m.group(1) + data_uri(rel) + m.group(3)
+
+    html_text = re.sub(r'(src=")(assets/img/[^"]+)(")', sub, html_text)
+    html_text = re.sub(r"(url\(')(assets/fonts/[^']+)('\))",
+                       lambda m: m.group(1) + data_uri(m.group(2)) + m.group(3), html_text)
+    return html_text, cache
+
+
 def main():
     deck = json.load(open(os.path.join(HERE, "deck.json")))
     imgmap = json.load(open(os.path.join(HERE, "imgmap.json")))
@@ -522,6 +557,27 @@ def main():
     path = os.path.join(OUT, "index.html")
     open(path, "w", encoding="utf-8").write(out)
     print(f"wrote {path}  ({len(out)/1024:.0f} KB, {total} slides)")
+
+    # --- standalone single-file build (every asset inlined) ---------------
+    solo, _cache = inline_assets(out)
+    solo = solo.replace(
+        '<script id="deckData">',
+        '<script>\n'
+        '/* images that appear on more than one slide are stored once; '
+        'point the repeats at the original before the deck boots */\n'
+        '(function () {\n'
+        '  var first = {};\n'
+        '  document.querySelectorAll("img[data-file]").forEach(function (im) {\n'
+        '    var f = im.dataset.file;\n'
+        '    if (im.dataset.dup) { if (first[f]) im.src = first[f]; }\n'
+        '    else if (!first[f]) first[f] = im.getAttribute("src");\n'
+        '  });\n'
+        '})();\n'
+        '</script>\n<script id="deckData">',
+    )
+    spath = os.path.join(OUT, "ess-complications-standalone.html")
+    open(spath, "w", encoding="utf-8").write(solo)
+    print(f"wrote {spath}  ({len(solo)/1048576:.1f} MB, self-contained)")
 
 
 if __name__ == "__main__":

@@ -234,7 +234,7 @@
             card.style.animationDelay = Math.min(k * 6, 400) + 'ms';
             card.innerHTML =
                 (s.thumb
-                    ? '<div class="gthumb"><img loading="lazy" src="assets/img/' + s.thumb + '" alt=""></div>'
+                    ? '<div class="gthumb"><img loading="lazy" src="' + imgSrc(s.thumb) + '" alt=""></div>'
                     : '<div class="gthumb empty">' + c.s + '</div>') +
                 '<div class="gmeta"><span class="gnum">' + String(s.n).padStart(2, '0') +
                 (s.nf ? ' · ' + s.nf + ' fig' : '') + '</span>' +
@@ -345,6 +345,13 @@
        ------------------------------------------------------- */
     var lb = { figs: [], k: 0, z: 1, x: 0, y: 0, drag: null };
 
+    /* the deck already holds every image once — reuse those bytes for the
+       lightbox and the overview thumbnails instead of a second copy */
+    function imgSrc(file) {
+        var im = document.querySelector('img[data-file="' + file + '"]');
+        return im ? (im.currentSrc || im.src) : 'assets/img/' + file;
+    }
+
     function openLightbox(fig) {
         lb.figs = $$('.fig', slides[state.i]);
         lb.k = Math.max(0, lb.figs.indexOf(fig));
@@ -355,7 +362,8 @@
     function loadLb() {
         var f = lb.figs[lb.k];
         if (!f) return;
-        $('#lbImg').src = f.dataset.src;
+        var src = f.querySelector('img');
+        $('#lbImg').src = src ? (src.currentSrc || src.src) : '';
         var cap = f.querySelector('.fig-cap');
         var chips = $$('.chip', f).map(function (c) { return c.textContent; }).join(' · ');
         $('#lbCap').textContent =
@@ -468,42 +476,201 @@
     }
 
     /* -------------------------------------------------------
-       INLINE EDITING — autosaves to localStorage
+       REAL-TIME EDITING
+       Every text run on the slide is directly editable. The slide
+       re-lays out as you type (auto-fit + figure grid re-solve),
+       bullets can be added/removed, figures deleted, and the whole
+       edited deck saved back out as a standalone HTML file.
        ------------------------------------------------------- */
-    var EDIT_SEL = '.s-title, .b span, .fig-cap, .chip, .cover-title, .closing-title, .tr-title, .tg h4, .src, .b1 span';
+    var EDIT_SEL = [
+        '.s-title', '.eyebrow', '.b span', '.fig-cap', '.chip', '.src',
+        '.cover-kicker', '.cover-title', '.cover-by', '.cover-meta span',
+        '.closing-title', '.closing-sub', '.tr-title', '.tr-note', '.tg h4',
+        '.tbl th', '.tbl td'
+    ].join(', ');
+
+    /* elements a user can delete outright while editing */
+    var KILL_SEL = '.b, .fig, .chip, .src, .tbl tr';
 
     function setEditing(on) {
         state.editing = on;
         document.body.classList.toggle('editing', on);
         $('#editToggle').classList.toggle('on', on);
+        $('#editToggle').classList.toggle('show', on);
+        var b = $('[data-act="edit"]');
+        if (b) b.classList.toggle('on', on);
+        $('#editBar').hidden = !on;
         $$(EDIT_SEL).forEach(function (el) {
             if (on) el.setAttribute('contenteditable', 'true');
             else el.removeAttribute('contenteditable');
         });
-        toast(on ? 'Edit mode on — click any text, changes save automatically' : 'Edit mode off');
-        if (!on) fitAll();
+        if (!on) { hideKill(); document.getSelection().removeAllRanges(); }
+        refitActive();
+        toast(on
+            ? 'Editing — click any text. Enter adds a bullet, ✕ removes a block.'
+            : 'Editing off');
     }
 
-    function saveEdits() {
-        var map = {};
-        slides.forEach(function (s, i) {
-            $$(EDIT_SEL, s).forEach(function (el, k) { map[i + ':' + k] = el.innerHTML; });
-        });
-        try { localStorage.setItem(LS + ':edits', JSON.stringify(map)); } catch (e) {}
+    /* re-solve only the slide being edited: instant feedback, no jank */
+    function refitActive() {
+        var s = slides[state.i];
+        if (!s) return;
+        $$('.figbox', s).forEach(solveGrid);
+        $$('.panel-body', s).forEach(fitPanel);
     }
 
-    function restoreEdits() {
+    /* --- floating delete affordance -------------------------- */
+    var killTarget = null;
+
+    function showKill(el) {
+        killTarget = el;
+        var k = $('#killBtn');
+        var r = el.getBoundingClientRect();
+        k.style.left = Math.min(window.innerWidth - 34, r.right - 12) + 'px';
+        k.style.top = Math.max(6, r.top - 6) + 'px';
+        k.hidden = false;
+    }
+
+    function hideKill() {
+        killTarget = null;
+        $('#killBtn').hidden = true;
+    }
+
+    function removeTarget() {
+        if (!killTarget) return;
+        var host = killTarget.closest('.slide');
+        killTarget.remove();
+        hideKill();
+        refitActive();
+        saveDoc();
+        if (host) toast('Block removed — Reset in the edit bar restores the original deck');
+    }
+
+    /* --- bullet keyboard behaviour --------------------------- */
+    function onEditKey(e) {
+        if (!state.editing) return;
+        var span = e.target.closest && e.target.closest('.b span');
+        if (!span) return;
+        var li = span.parentElement;
+
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            var clone = li.cloneNode(true);
+            var cs = clone.querySelector('span');
+            cs.innerHTML = '';
+            cs.setAttribute('contenteditable', 'true');
+            li.insertAdjacentElement('afterend', clone);
+            cs.focus();
+            refitActive();
+            saveDoc();
+        } else if (e.key === 'Backspace' && !span.textContent.trim()) {
+            var prev = li.previousElementSibling;
+            if (!prev) return;
+            e.preventDefault();
+            li.remove();
+            var ps = prev.querySelector('span');
+            if (ps) {
+                ps.focus();
+                var r = document.createRange();
+                r.selectNodeContents(ps);
+                r.collapse(false);
+                var sel = document.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(r);
+            }
+            refitActive();
+            saveDoc();
+        }
+    }
+
+    /* --- persistence ----------------------------------------- */
+    function saveDoc() {
+        try {
+            localStorage.setItem(LS + ':doc', stage.innerHTML);
+            localStorage.setItem(LS + ':docv', '2');
+        } catch (e) {
+            toast('Edits are too large for this browser to remember — use Save HTML');
+        }
+    }
+
+    function restoreDoc() {
         var raw;
-        try { raw = localStorage.getItem(LS + ':edits'); } catch (e) { return; }
-        if (!raw) return;
-        var map;
-        try { map = JSON.parse(raw); } catch (e) { return; }
+        try {
+            if (localStorage.getItem(LS + ':docv') !== '2') return false;
+            raw = localStorage.getItem(LS + ':doc');
+        } catch (e) { return false; }
+        if (!raw) return false;
+        stage.innerHTML = raw;
+        slides = $$('.slide');
+        total = slides.length;
+        return true;
+    }
+
+    function resetDoc() {
+        try {
+            localStorage.removeItem(LS + ':doc');
+            localStorage.removeItem(LS + ':docv');
+            localStorage.removeItem(LS + ':edits');
+        } catch (e) {}
+        location.reload();
+    }
+
+    /* keep the search index honest after edits */
+    function syncIndex() {
         slides.forEach(function (s, i) {
-            $$(EDIT_SEL, s).forEach(function (el, k) {
-                var v = map[i + ':' + k];
-                if (v !== undefined && v !== el.innerHTML) el.innerHTML = v;
-            });
+            var rec = DATA.slides[i];
+            if (!rec) return;
+            var t = s.querySelector('.s-title, .cover-title, .closing-title');
+            if (t) rec.t = t.textContent.trim().replace(/\s+/g, ' ');
+            var body = s.querySelector('.slide-inner');
+            if (body) rec.txt = (body.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 2600);
         });
+    }
+
+    /* --- save the edited deck back out as one HTML file ------- */
+    function saveHtml() {
+        syncIndex();
+        var clone = document.documentElement.cloneNode(true);
+        clone.querySelectorAll('[contenteditable]').forEach(function (e) {
+            e.removeAttribute('contenteditable');
+        });
+        /* repeated images resolve themselves on load — don't serialise a
+           second copy of their (possibly very large) data URI */
+        clone.querySelectorAll('img[data-dup]').forEach(function (im) {
+            im.removeAttribute('src');
+        });
+        clone.querySelectorAll('.slide').forEach(function (s) {
+            s.classList.remove('active', 'visible');
+        });
+        var body = clone.querySelector('body');
+        body.classList.remove('editing', 'dock-lit');
+        var bar = clone.querySelector('#editBar');
+        if (bar) bar.setAttribute('hidden', '');
+        var kb = clone.querySelector('#killBtn');
+        if (kb) kb.setAttribute('hidden', '');
+        /* overlays rebuild themselves on demand — shipping their generated
+           markup would carry a second copy of every thumbnail */
+        ['#gridBody', '#gridChips', '#searchBody'].forEach(function (sel) {
+            var el = clone.querySelector(sel);
+            if (el) el.innerHTML = '';
+        });
+        var lb = clone.querySelector('#lbImg');
+        if (lb) lb.removeAttribute('src');
+
+        var data = clone.querySelector('#deckData');
+        if (data) data.textContent = 'window.DECK = ' + JSON.stringify(DATA) + ';';
+
+        var html = '<!DOCTYPE html>\n' + clone.outerHTML;
+        var blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'ess-deck-edited.html';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        toast('Saved a standalone copy with your edits');
     }
 
     /* -------------------------------------------------------
@@ -594,6 +761,7 @@
                 else if (a === 'theme') toggleTheme();
                 else if (a === 'full') toggleFull();
                 else if (a === 'help') openOv('#helpOverlay');
+                else if (a === 'edit') setEditing(!state.editing);
                 else if (a === 'jump') openOv('#gridOverlay');
             });
         });
@@ -710,12 +878,34 @@
         $('#editToggle').addEventListener('mouseenter', showBtn);
         $('#editToggle').addEventListener('mouseleave', hideBtn);
         $('#editToggle').addEventListener('click', function () { setEditing(!state.editing); });
+        $('#editDone').addEventListener('click', function () { setEditing(false); });
+        $('#editSave').addEventListener('click', saveHtml);
+        $('#editReset').addEventListener('click', function () {
+            if (confirm('Discard every edit and restore the original deck?')) resetDoc();
+        });
+        $('#killBtn').addEventListener('click', removeTarget);
 
+        /* live re-layout while typing, then persist shortly after */
         document.addEventListener('input', function (e) {
-            if (e.target.isContentEditable) {
-                clearTimeout(state._save);
-                state._save = setTimeout(saveEdits, 500);
-            }
+            if (!e.target.isContentEditable) return;
+            clearTimeout(state._fitT);
+            state._fitT = setTimeout(refitActive, 90);
+            clearTimeout(state._save);
+            state._save = setTimeout(saveDoc, 600);
+        });
+
+        document.addEventListener('keydown', onEditKey, true);
+
+        /* the ✕ follows whatever block the pointer is over */
+        stage.addEventListener('mouseover', function (e) {
+            if (!state.editing) return;
+            var t = e.target.closest(KILL_SEL);
+            if (t && t !== killTarget) showKill(t);
+        });
+        stage.addEventListener('mouseleave', function () {
+            if (state.editing) setTimeout(function () {
+                if (!$('#killBtn').matches(':hover')) hideKill();
+            }, 260);
         });
 
         /* dock wakes up on pointer activity near the bottom */
@@ -747,7 +937,7 @@
             if (th) setTheme(th);
         } catch (e) {}
 
-        restoreEdits();
+        var restored = restoreDoc();
 
         var start = 0;
         var m = /^#\/(\d+)$/.exec(location.hash);
@@ -772,7 +962,12 @@
             state._ft = setTimeout(fitAll, 220);
         });
 
-        window.__deck = { show: show, fitAll: fitAll, state: state };
+        if (restored) toast('Restored your edited copy — Reset in the edit bar brings back the original');
+
+        window.__deck = {
+            show: show, fitAll: fitAll, state: state,
+            edit: setEditing, save: saveHtml, reset: resetDoc
+        };
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
